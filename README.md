@@ -18,6 +18,8 @@ Macaron Artifacts currently targets Linux and macOS. Native Windows environments
 
 The repo doubles as its own plugin marketplace. Use the full https URL — the `owner/repo` shorthand may clone over SSH, which fails without a GitHub SSH key.
 
+After installing the plugin, start a new agent session so the slash command and bundled skills are loaded.
+
 ### Claude Code
 
 In a Claude Code session, run each command separately (pasting both lines at once merges them into one command):

@@ -30,7 +30,7 @@ import {
 } from '../lib/kimi-config.js';
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
-import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
+import { registerRun, claimRun, abortRun, endRun } from '../lib/active-runs.js';
 import type { AttachedImage } from '../lib/claude-runner.js';
 import type { SessionStreamEvent } from '@macaron/shared';
 
@@ -38,7 +38,14 @@ type SidParams = { sid: string };
 type NewThreadBody = { text?: string; cwd?: string; images?: AttachedImage[] };
 type MessageBody = { text?: string; images?: AttachedImage[] };
 
-export async function registerKimiRoutes(app: FastifyInstance): Promise<void> {
+type KimiRouteOptions = {
+  runKimi?: typeof runKimi;
+  readKimiSessionMessages?: typeof readKimiSessionMessages;
+};
+
+export async function registerKimiRoutes(app: FastifyInstance, options: KimiRouteOptions = {}): Promise<void> {
+  const runKimiForRoute = options.runKimi ?? runKimi;
+  const readKimiSessionMessagesForRoute = options.readKimiSessionMessages ?? readKimiSessionMessages;
   // --- Threads -----------------------------------------------------------
 
   app.get('/api/kimi/threads', async () => {
@@ -74,7 +81,7 @@ export async function registerKimiRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: SidParams }>('/api/kimi/threads/:sid', async ({ params }, reply) => {
     try {
-      return await readKimiSessionMessages(params.sid);
+      return await readKimiSessionMessagesForRoute(params.sid);
     } catch (e) {
       return reply.status(404).send({ error: (e as Error).message });
     }
@@ -95,6 +102,7 @@ export async function registerKimiRoutes(app: FastifyInstance): Promise<void> {
     reply: Parameters<typeof startSSE>[0],
     stream: ReturnType<typeof runKimi>,
     sid: string | null,
+    owner: AbortController,
     live: { cwd: string; text: string; hasImages: boolean },
   ) => {
     let clientGone = false;
@@ -121,30 +129,47 @@ export async function registerKimiRoutes(app: FastifyInstance): Promise<void> {
       safeSend(payload);
       if (capturedSid) livePush(capturedSid, payload);
     };
-    (async () => {
-      for await (const ev of stream) {
-        if (ev.kind === 'session' && !capturedSid) {
-          capturedSid = ev.sessionId;
-          ensureLive();
-          safeSend({ type: 'meta', cwd: live.cwd, sessionId: capturedSid });
-        } else if (ev.kind === 'delta') relay({ type: 'delta', text: ev.text });
-        else if (ev.kind === 'tool_use') relay({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
-        else if (ev.kind === 'tool_result') relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
-        else if (ev.kind === 'usage') relay({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
-        else if (ev.kind === 'message') relay({ type: 'event', event: 'system', subtype: ev.subtype });
-        else if (ev.kind === 'error') relay({ type: 'error', error: ev.error });
-        else if (ev.kind === 'done') {
-          safeSend({ type: 'done', exitCode: ev.exitCode });
-          if (capturedSid) { liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode }); endRun(capturedSid); }
-          if (!clientGone) sseDone(reply);
-        }
+    let terminalSent = false;
+    const finishRun = (exitCode: number, error?: string) => {
+      if (terminalSent) return;
+      terminalSent = true;
+      if (error) safeSend({ type: 'error', error });
+      const done = { type: 'done' as const, exitCode, ...(error ? { error } : {}) };
+      safeSend(done);
+      if (capturedSid) {
+        liveEnd(capturedSid, done);
+        endRun(capturedSid, owner);
       }
-    })().catch((e: unknown) => {
-      const msg = (e as Error).message;
-      if (capturedSid) { liveEnd(capturedSid, { type: 'done', exitCode: -1, error: msg }); endRun(capturedSid); }
-      safeSend({ type: 'error', error: msg });
-      if (!clientGone) sseDone(reply);
-    });
+    };
+    void (async () => {
+      try {
+        for await (const ev of stream) {
+          if (ev.kind === 'session' && !capturedSid) {
+            capturedSid = ev.sessionId;
+            ensureLive();
+            safeSend({ type: 'meta', cwd: live.cwd, sessionId: capturedSid });
+          } else if (ev.kind === 'delta') relay({ type: 'delta', text: ev.text });
+          else if (ev.kind === 'tool_use') relay({ type: 'tool_use', id: ev.id, name: ev.name, input: ev.input });
+          else if (ev.kind === 'tool_result') relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
+          else if (ev.kind === 'usage') relay({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
+          else if (ev.kind === 'message') relay({ type: 'event', event: 'system', subtype: ev.subtype });
+          else if (ev.kind === 'error') relay({ type: 'error', error: ev.error });
+          else if (ev.kind === 'done') {
+            finishRun(ev.exitCode);
+            return;
+          }
+        }
+        finishRun(-1, 'runner ended without a terminal event');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        finishRun(-1, msg);
+      } finally {
+        // Owner-guarded and idempotent: a stale iterator cannot release a newer
+        // controller, while every settled iterator gives up its own claim.
+        if (capturedSid) endRun(capturedSid, owner);
+        if (!clientGone) sseDone(reply);
+      }
+    })();
   };
 
   app.post<{ Body: NewThreadBody }>('/api/kimi/threads', async (req, reply) => {
@@ -163,7 +188,7 @@ export async function registerKimiRoutes(app: FastifyInstance): Promise<void> {
     startSSE(reply);
     sseSend(reply, { type: 'starting', cwd });
     const abortController = new AbortController();
-    const stream = runKimi({ prompt: text, cwd, images, abortController });
+    const stream = runKimiForRoute({ prompt: text, cwd, images, abortController });
     // pipeKimiToSSE owns the iteration, so wrap the runner to install the abort
     // under the sid once the first `session` event reveals it.
     const wrapped = (async function* () {
@@ -172,7 +197,7 @@ export async function registerKimiRoutes(app: FastifyInstance): Promise<void> {
         yield ev;
       }
     })();
-    pipeKimiToSSE(reply, wrapped as ReturnType<typeof runKimi>, null, { cwd, text, hasImages: images.length > 0 });
+    pipeKimiToSSE(reply, wrapped as ReturnType<typeof runKimi>, null, abortController, { cwd, text, hasImages: images.length > 0 });
   });
 
   app.post<{ Params: SidParams; Body: MessageBody }>(
@@ -186,16 +211,18 @@ export async function registerKimiRoutes(app: FastifyInstance): Promise<void> {
       }
       let cwd = process.env.HOME || '/tmp';
       try {
-        const detail = await readKimiSessionMessages(sid);
+        const detail = await readKimiSessionMessagesForRoute(sid);
         if (detail.cwd) cwd = detail.cwd;
       } catch (e) {
         return reply.status(404).send({ error: (e as Error).message });
       }
+      const abortController = new AbortController();
+      if (!claimRun(sid, abortController)) {
+        return reply.status(409).send({ error: 'a turn is already in flight for this thread' });
+      }
       startSSE(reply);
       sseSend(reply, { type: 'meta', sessionId: sid, cwd });
-      const abortController = new AbortController();
-      registerRun(sid, abortController);
-      pipeKimiToSSE(reply, runKimi({ prompt: text, cwd, resume: sid, images, abortController }), sid, { cwd, text, hasImages: images.length > 0 });
+      pipeKimiToSSE(reply, runKimiForRoute({ prompt: text, cwd, resume: sid, images, abortController }), sid, abortController, { cwd, text, hasImages: images.length > 0 });
     },
   );
 

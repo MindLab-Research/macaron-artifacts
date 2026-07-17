@@ -105,16 +105,42 @@ SERVER_DIST="$DIR/server/dist/index.js"
 # Node 22 ships corepack, which auto-materialises the pnpm binary from the
 # `packageManager` field in package.json. Prefer it over any globally
 # installed pnpm so the version is consistent across machines.
+_GLOBAL_PNPM="$(command -v pnpm 2>/dev/null || true)"
 _PNPM=""
+_PNPM_FIX="pnpm"
 if command -v corepack >/dev/null 2>&1; then
   # corepack enable is idempotent; --install-directory ensures we don't
   # need root privileges.
-  corepack enable --install-directory "$DIR/node_modules/.corepack-bin" pnpm >/dev/null 2>&1 || true
+  _COREPACK_BIN="$DIR/node_modules/.corepack-bin"
+  mkdir -p "$_COREPACK_BIN"
+  corepack enable --install-directory "$_COREPACK_BIN" pnpm >/dev/null 2>&1 || true
   # Prepend the corepack shim dir so `pnpm` resolves to the pinned version.
-  export PATH="$DIR/node_modules/.corepack-bin:$PATH"
-  _PNPM="pnpm"
-elif command -v pnpm >/dev/null 2>&1; then
-  _PNPM="pnpm"
+  # Some Corepack builds do not create a shim here unless global pnpm is
+  # already installed, so create a local fallback wrapper for package scripts.
+  if [ ! -x "$_COREPACK_BIN/pnpm" ]; then
+    cat > "$_COREPACK_BIN/pnpm" <<'EOF'
+#!/usr/bin/env bash
+exec corepack pnpm "$@"
+EOF
+    chmod +x "$_COREPACK_BIN/pnpm"
+  fi
+  export PATH="$_COREPACK_BIN:$PATH"
+  _PNPM_FIX="corepack pnpm"
+  if pnpm --version >/dev/null 2>&1; then
+    _PNPM="pnpm"
+  elif [ -z "${COREPACK_INTEGRITY_KEYS+x}" ]; then
+    # Older Corepack builds can reject newer pnpm signing keys. If that is the
+    # only blocker, disable the stale key check for this launcher process.
+    export COREPACK_INTEGRITY_KEYS=0
+    _PNPM_FIX="COREPACK_INTEGRITY_KEYS=0 corepack pnpm"
+    if pnpm --version >/dev/null 2>&1; then
+      _PNPM="pnpm"
+    fi
+  fi
+fi
+if [ -z "$_PNPM" ] && [ -n "$_GLOBAL_PNPM" ]; then
+  _PNPM="$_GLOBAL_PNPM"
+  _PNPM_FIX="$_GLOBAL_PNPM"
 fi
 
 if [ -z "$_PNPM" ]; then
@@ -150,7 +176,7 @@ if [ "$needs_install" = 1 ]; then
     if ! (cd "$DIR" && "$_PNPM" install 2>&1); then
       cat >&2 <<EOF
 [macaron] pnpm install failed.
-[macaron] fix: cd "$DIR" && rm -rf node_modules && $_PNPM install
+[macaron] fix: cd "$DIR" && rm -rf node_modules && $_PNPM_FIX install
 [macaron] if that still fails, the pnpm-lock.yaml may be corrupt; open
 [macaron] an issue at https://github.com/MindLab-Research/macaron-artifacts/issues
 EOF
@@ -191,7 +217,7 @@ if [ "$needs_build" = 1 ]; then
 [macaron] build failed. Common causes and fixes:
 [macaron]  1. Node version — this project needs Node 22+; check with \`node --version\`.
 [macaron]  2. Stale install — try:
-[macaron]        cd "$DIR" && rm -rf node_modules && $_PNPM install && $_PNPM run build
+[macaron]        cd "$DIR" && rm -rf node_modules && $_PNPM_FIX install && $_PNPM_FIX run build
 [macaron]  3. Read the build output above for the specific error and share it in an issue.
 EOF
     exit 1

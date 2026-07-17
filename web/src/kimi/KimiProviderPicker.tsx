@@ -31,6 +31,12 @@ export function KimiProviderPicker() {
   }
 
   const activeId = settings.activeProviderId;
+  // The active provider may be a keyless custom one (excluded from options
+  // above) — surface it anyway so the controlled <select> value has a match.
+  if (!options.some((o) => o.id === activeId)) {
+    const p = settings.customProviders.find((cp) => cp.id === activeId);
+    if (p) options.push({ id: p.id, label: p.name, usable: false });
+  }
   const activeLabel =
     options.find((o) => o.id === activeId)?.label
     ?? (activeId === SYSTEM_ID ? 'System default' : '(unconfigured)');

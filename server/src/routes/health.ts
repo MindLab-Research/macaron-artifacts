@@ -1,15 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import { getActiveProviderEnv } from '../lib/settings-store.js';
+import { getActiveKimiProvider } from '../lib/kimi-config.js';
 import { isSearchEnabled, indexStats } from '../lib/search-index.js';
 import { startSSE, sseSend } from '../lib/sse.js';
 import { subscribeSystemEvents } from '../lib/session-watcher.js';
 
 export async function registerHealthRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/health', async () => {
-    const { model } = getActiveProviderEnv();
+    const model = process.env.MACARON_ENGINE === 'kimi'
+      ? getActiveKimiProvider()?.model || null
+      : getActiveProviderEnv().model || null;
     return {
       ok: true,
-      model: model || null,
+      model,
       search: isSearchEnabled() ? indexStats() : null,
     };
   });

@@ -190,6 +190,12 @@ export async function* runKimi(opts: KimiRunOptions): AsyncGenerator<RunnerEvent
             const id = u.toolCallId;
             emitToolUseIfReady(id, u.title ?? undefined, (u as { rawInput?: unknown }).rawInput);
             if (u.status === 'completed' || u.status === 'failed') {
+              // Some agents carry rawInput only on rawOutput-bearing updates; if
+              // no tool_use went out yet, emit one now so the result isn't orphaned.
+              if (!toolUseEmitted.has(id)) {
+                toolUseEmitted.add(id);
+                push({ kind: 'tool_use', id, name: toolTitle.get(id) || 'tool', input: {} });
+              }
               const raw = (u as { rawOutput?: unknown }).rawOutput;
               let text = typeof raw === 'string' ? raw : raw != null ? JSON.stringify(raw) : '';
               if (!text && Array.isArray(u.content)) {
@@ -260,8 +266,12 @@ export async function* runKimi(opts: KimiRunOptions): AsyncGenerator<RunnerEvent
         push({ kind: 'session', sessionId: capturedSid });
       }
 
-      if (opts.abortController?.signal.aborted) onAbort();
-      else opts.abortController?.signal.addEventListener('abort', onAbort, { once: true });
+      if (opts.abortController?.signal.aborted) {
+        onAbort();
+        push({ kind: 'done', exitCode: -1 });
+        return;
+      }
+      opts.abortController?.signal.addEventListener('abort', onAbort, { once: true });
 
       const result = await conn.prompt({ sessionId: capturedSid, prompt: buildPromptBlocks(opts.prompt, opts.images || []) });
       const aborted = Boolean(opts.abortController?.signal.aborted) || result.stopReason === 'cancelled';

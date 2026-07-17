@@ -144,7 +144,7 @@ function ProviderList({
           {isAct(SYSTEM_ID) && <span className="kx-plist-active-badge">active</span>}
         </div>
         <div className="kx-plist-row-sub">
-          {builtin.detectedEndpoint || 'ambient OAuth login'}
+          ambient OAuth login
         </div>
       </button>
 
@@ -193,8 +193,6 @@ function SystemPane({
       </div>
       <p className="kx-section-body">{builtin.description}</p>
       <dl className="kx-kv">
-        <dt>Detected endpoint</dt>
-        <dd>{builtin.detectedEndpoint || <em>none</em>}</dd>
         <dt>Detected model</dt>
         <dd>{builtin.detectedModel || <em>none</em>}</dd>
       </dl>

@@ -25,7 +25,6 @@ export type PublicKimiBuiltin = {
   id: 'system';
   name: string;
   description: string;
-  detectedEndpoint: string | null;
   detectedModel: string | null;
 };
 

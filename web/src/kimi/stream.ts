@@ -37,6 +37,7 @@ async function pump(resp: Response, h: KimiStreamHandlers): Promise<void> {
   if (!resp.ok || !resp.body) {
     const txt = await resp.text().catch(() => '');
     h.onError?.(`http ${resp.status}: ${txt.slice(0, 200)}`);
+    h.onDone?.(-1); // so callers waiting on onDone (setSending(false)) don't hang
     return;
   }
   const reader = resp.body.getReader();
