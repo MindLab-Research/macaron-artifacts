@@ -1,0 +1,51 @@
+@layer base {
+  :root {
+    --background: 40 33% 98%;
+    --foreground: 240 10% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 4%;
+    --primary: 240 6% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 40 18% 94%;
+    --secondary-foreground: 240 6% 10%;
+    --muted: 40 18% 94%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 40 18% 94%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 30 14% 86%;
+    --un-default-border-color: hsl(var(--border));
+    --input: 30 14% 86%;
+    --ring: 10 90% 57%;
+    --chart-1: #d85a30;
+    --chart-2: #1d9e75;
+    --chart-3: #7f77dd;
+    --chart-4: #ba7517;
+    --chart-5: #888780;
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root,
+  #genui-root {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    margin: 0;
+  }
+
+  #root,
+  #genui-root {
+    min-height: 100vh;
+  }
+}

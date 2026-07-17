@@ -1,0 +1,106 @@
+---
+title: Packaging
+description: Three publishable launchers, prebuilt bundles, the plugin manifests, and the pkg.pr.new per-commit release flow.
+---
+
+Macaron Artifacts ships in three shapes from one repo: as **plugin manifests** for Claude Code, Codex, and Kimi Code, as three **npm-runnable launchers** (`mcc` / `mcx` / `mkx`), and as **prebuilt tarballs** published per commit by pkg.pr.new. This page covers how the builds and releases are wired.
+
+## Three Packages
+
+<Tabs items={['mcc (root)', 'mcx', 'mkx']}>
+<Tab value="mcc (root)">
+
+The repo root **is** the `mcc` package. Its `bin` is `./bin/mcc.mjs`, and `files` ships only the launcher, the bundled `server/dist/index.js`, `web/dist`, and the README. A `prepack` hook builds everything before publish:
+
+```json
+"prepack": "pnpm --filter @macaron/shared build && pnpm --filter @macaron/server bundle && pnpm --filter @macaron/web build"
+```
+
+</Tab>
+<Tab value="mcx">
+
+`mcx/package.json` is a second publishable package with bin `./bin/mcx.mjs`. Its own `prepack` runs the root prepack, then `scripts/stage.mjs` copies the freshly built `server/dist` + `web/dist` into `mcx/` so the tarball is self-contained — no dependency on `mcc`.
+
+```json
+"prepack": "pnpm -w prepack && node scripts/stage.mjs"
+```
+
+</Tab>
+<Tab value="mkx">
+
+`mkx/package.json` mirrors `mcx` exactly — bin `./bin/mkx.mjs`, same `prepack` + `scripts/stage.mjs` staging, same self-contained tarball. Only the launcher name, default port (`7980`), and `MACARON_ENGINE=kimi` differ.
+
+```json
+"prepack": "pnpm -w prepack && node scripts/stage.mjs"
+```
+
+</Tab>
+</Tabs>
+
+All three declare `engines.node >= 22` and externalize every npm dep (`bun build --packages=external`), so the server bundle stays small. The **server** imports `@macaron/shared` for types only, so it never reaches the runtime bundle; the **web** side does pull a few real runtime values from it (e.g. the `SEARCH_HL_OPEN` / `SEARCH_HL_CLOSE` highlight markers), so there the dependency is not type-only.
+
+## Per-Commit Releases
+
+`.github/workflows/pkg-pr-new.yml` publishes on every push to `main` and every PR. It runs the pinned binary from the lockfile (not a dlx-style unpinned fetch) and publishes **all three** packages in one shot:
+
+```bash
+pnpm exec pkg-pr-new publish --no-compact --bin . ./mcx ./mkx
+```
+
+`npm pack` fires each package's `prepack` hook, so the tarballs ship prebuilt `server/dist` + `web/dist` and run without Vite at runtime. The published URLs are pinned to the commit:
+
+<Callout title="This is what the install page links to">
+  The [Usage](/docs/usage) page's `bunx mcc@…` / `bunx mcx@…` / `bunx mkx@…` commands carry a `<sha>` placeholder that a build-time remark plugin (`remarkCommitSha`) rewrites to the build commit's short SHA — pulled from `VERCEL_GIT_COMMIT_SHA` / `GITHUB_SHA`, or `git rev-parse` locally. When none is available (e.g. a shallow copy or a deploy without the commit env wired in), it leaves the literal `<sha>` in place rather than guessing. So the pin is only as precise as the environment the docs were built in.
+</Callout>
+
+## The Plugin Manifests
+
+For agents that install Macaron as a plugin rather than running a tarball:
+
+<Files>
+  <Folder name=".claude-plugin" defaultOpen>
+    <File name="plugin.json" />
+    <File name="marketplace.json" />
+  </Folder>
+  <Folder name=".codex-plugin" defaultOpen>
+    <File name="plugin.json" />
+  </Folder>
+  <Folder name=".kimi-plugin" defaultOpen>
+    <File name="plugin.json" />
+  </Folder>
+  <Folder name="commands">
+    <File name="macaron.md" />
+  </Folder>
+  <Folder name="commands-kimi">
+    <File name="macaron.md" />
+  </Folder>
+  <File name="start.sh" />
+</Files>
+
+`.claude-plugin/plugin.json` carries the name / description / keywords and `marketplace.json` registers the plugin source; `.codex-plugin/plugin.json` and `.kimi-plugin/plugin.json` are the Codex-side and Kimi-side manifests. `commands/macaron.md` defines the `/macaron` slash command, `commands-kimi/macaron.md` the Kimi-side `/macaron:macaron`, and `start.sh` installs, builds, and launches on first run.
+
+The `/macaron` command runs `start.sh`, which is the interesting piece:
+
+<Steps>
+<Step>
+### Mirror out of an ephemeral cache
+
+Plugin cache dirs (`~/.claude/plugins/cache/…`, `~/.codex/plugins/cache/…`) get pruned under the running server. When launched from one, `start.sh` rsyncs source into a stable `~/.macaron/runtime/<version>/` and runs from there so `node_modules` and `dist` survive.
+</Step>
+<Step>
+### Install and build once
+
+It uses **pnpm via corepack** (ships with Node 22+), installs with `--frozen-lockfile` (falling back to a full resolve), and rebuilds only when a source file is newer than the current `web/dist/index.html` — a fast `find … -print -quit` mtime check.
+</Step>
+<Step>
+### Launch on the right port
+
+The engine (`claude` / `codex` / `kimi`) picks the default port (`7878` / `7979` / `7980`); if `lsof` is available, any prior process on that port is killed first, then the server boots. Most setup failures (missing Node 22, a broken install) print an actionable `[macaron] fix: …` line to stderr so the launching agent can self-repair and retry — though not every path does (e.g. the post-launch health-check probe just times out).
+</Step>
+</Steps>
+
+<Callout type="info" title="Why no committed dist/">
+  The plugin ships as **source, not prebuilt** `dist/`. Every commit rebuilding `server/dist` + `web/dist` produced unresolvable rebase conflicts across concurrent PRs, so the build was moved to first-launch instead.
+</Callout>
+
+That's the full loop — from a commit on `main`, to a pkg.pr.new tarball or an installed plugin, to a running server that boots one of three SPAs. Back to the [Overview](/docs/architecture/overview).

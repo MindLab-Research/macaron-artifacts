@@ -1,0 +1,48 @@
+{
+  "name": "@macaron/docs",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "build": "react-router build && node host-webui.mjs",
+    "dev": "react-router dev",
+    "start": "serve ./build/client --config ../../serve.json",
+    "typecheck": "react-router typegen && fumadocs-mdx && tsc --noEmit",
+    "test": "node --import tsx --test \"app/**/*.test.ts\"",
+    "verify": "react-router build && REQUIRE_BUILT_INDEX=1 node --import tsx --test \"app/**/*.test.ts\"",
+    "postinstall": "fumadocs-mdx"
+  },
+  "dependencies": {
+    "@lobehub/icons": "5.11.0",
+    "@orama/orama": "^3.1.18",
+    "@react-router/node": "^8.2.0",
+    "cnfast": "^0.0.8",
+    "fumadocs-core": "16.11.3",
+    "fumadocs-mdx": "15.1.0",
+    "fumadocs-ui": "npm:@fumadocs/base-ui@16.11.3",
+    "isbot": "^5.2.0",
+    "lucide-react": "^1.23.0",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-mdx": "^3.0.0",
+    "mdast-util-to-string": "^4.0.0",
+    "micromark-extension-mdxjs": "^3.0.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router": "^8.2.0"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^8.2.0",
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/mdast": "^4.0.4",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "react-router-devtools": "^6.2.1",
+    "serve": "^14.2.6",
+    "tailwindcss": "^4.3.2",
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.3"
+  }
+}

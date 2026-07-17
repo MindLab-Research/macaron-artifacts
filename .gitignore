@@ -1,0 +1,37 @@
+# Deps
+node_modules/
+.pnp
+.pnp.js
+
+# Build output — never committed. start.sh builds on first launch via
+# `corepack pnpm build`; subsequent launches skip the rebuild when source
+# mtimes are unchanged. Reason we don't ship prebuilt: every commit
+# regenerating dist created rebase-hell across concurrent PRs (dist churn
+# in every diff). CC / Codex agents can self-heal a first-run build
+# failure by reading start.sh's error output.
+dist/
+build/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs & tmp
+*.log
+/tmp/
+.tmp/
+.cache/
+
+# Claude Code local
+.claude/settings.local.json
+.vercel
+.env*

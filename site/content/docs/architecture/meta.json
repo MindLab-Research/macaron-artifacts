@@ -1,0 +1,13 @@
+{
+  "title": "Architecture",
+  "description": "How Macaron Artifacts is built — server, web, GenUI, and packaging.",
+  "pages": [
+    "overview",
+    "server",
+    "web",
+    "genui",
+    "codex",
+    "kimi",
+    "packaging"
+  ]
+}

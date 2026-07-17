@@ -1,0 +1,66 @@
+---
+title: GenUI
+description: The render_ui tool and the vendored renderer that compile model-authored TSX into a live component while tokens stream.
+---
+
+GenUI is Macaron's headline feature: the model doesn't just describe a UI, it **writes TSX that renders live** in the conversation. Two halves make this work — a server-side tool the model calls, and a browser-side renderer that compiles and mounts the streamed code.
+
+## The `render_ui` Tool
+
+`server/src/lib/macaron-render-tool.ts` is the shared handler behind the `render_ui` MCP tool. It is used by **both** engines from one implementation:
+
+<Cards>
+  <Card title="Claude side">
+    Exposed in-process via the Agent SDK's `createSdkMcpServer` — the tool lives inside the server.
+  </Card>
+  <Card title="Codex side">
+    Exposed by a standalone stdio MCP server (`macaron-mcp-stdio.ts`) injected into each Codex turn, so `render_ui` is available on the Codex path too — **when running from a source or plugin install** (see the packaging note below).
+  </Card>
+</Cards>
+
+Both surfaces return an **identical `tool_result` shape**, so the model self-corrects the same way regardless of engine. Before returning, the handler runs `checkGenUI` — a TypeScript diagnose pass over the submitted module — and flips `ok: false` when the code has type errors, so the model gets actionable feedback instead of a silent broken preview.
+
+<Callout type="warn" title="Availability depends on the install form">
+  The full GenUI path — the injected `render_ui` stdio server on the Codex side, and the *semantic* TypeScript diagnostics inside `checkGenUI` — is present when the server runs from **source** (a repo checkout) or a **plugin** install, where `server/src/macaron-mcp-stdio.ts` and `web/src/macaron-vendor` exist. The published pkg.pr.new tarballs (`mcc@…` / `mcx@…`) currently bundle only `server/dist/index.js` + `web/dist`, so they ship neither file: on the Codex path the stdio helper can't be spawned, and `checkGenUI` falls back to compile / syntax / UnoCSS lint only (`serviceUnavailable`, `genui-check.ts`). The in-browser preview renderer still works from `web/dist` on every install form. Packaging those files into the tarball is tracked separately from this docs PR.
+</Callout>
+
+<Callout type="info" title="UI changes preview first — by convention">
+  The tool's server-level instructions ask the model to treat a preview as the deliverable for a UI-change turn: render a `render_ui` preview of the *after* state (ending in Apply / Tweak / Discard buttons) and stop, only editing files once the user clicks Apply. This is a **prompt policy**, not a server-enforced edit gate — the runtime does not block file writes on a prior preview, so it holds only as far as the model follows the instruction.
+</Callout>
+
+## The Live Renderer
+
+On the browser side, `web/src/macaron-vendor/StaticGenUIRenderer.tsx` (wrapped by the thin `GenuiPreview.tsx`) turns streamed TSX text into a mounted React tree. It builds on `partial-react` — a compiler + renderer that tolerates **incomplete** source, so each streamed chunk can re-render without waiting for the full module.
+
+<Steps>
+<Step>
+### Receive streaming code
+
+`GenuiPreview` passes the accumulating `code` and a `streaming` flag straight through. While `streaming` is true it uses `flushMode="immediate"` and preserves component state across updates, so the preview morphs smoothly as tokens arrive.
+</Step>
+<Step>
+### Compile the TSX
+
+`createTsxCompiler` from `partial-react/compiler` transpiles the (possibly partial) module. Transform/parse errors mid-stream are transient — the renderer swallows them because the next chunk usually completes the syntax.
+</Step>
+<Step>
+### Resolve imports
+
+An import-map resolver maps bare specifiers (`react`, `$macaron/ui`, charts, lucide, motion) to the locally-served shim modules, so `react` and friends resolve to the page's own copy rather than a bundled duplicate. A further guard (`ensureNativeReactImportMap`) exists to also pin React for third-party components pulled from an `esm.sh` fallback, but it is **not currently wired into the render path** — the esm.sh fallback route therefore has no active second-React protection yet.
+</Step>
+<Step>
+### Mount and cross-fade
+
+The compiled module is mounted. In-place updates just re-render the live tree, but when the renderer has to **rebuild** (e.g. the import map changed and the old root is torn down) it holds a snapshot of the old DOM and cross-fades (~200 ms) to the new tree so the swap doesn't flash. Streaming token updates are not each a cross-fade — only the rebuild path is.
+</Step>
+</Steps>
+
+## The Import Shims
+
+`web/public/genui-shim/*.mjs` provides the runtime modules the compiled TSX imports — `react.mjs`, `react-dom.mjs`, the JSX runtimes, `ui.mjs`, `charts.mjs`, `lucide.mjs`, `motion.mjs`, and `chat.mjs`. These are what the import map points bare specifiers at, so a model-authored `import { Card } from '$macaron/ui'` resolves without a build step in the browser.
+
+## The `genui-builder` Skill
+
+For agents driving the CLI rather than the WebUI, the bundled **`genui-builder`** skill (`skills/genui-builder/SKILL.md`) teaches the model to author streaming GenUI artifacts. It prefers the `render_ui` MCP tool when exposed, and falls back to a pinned `@genui/cli` (`bunx genui@…`) for `lint` / `check` / standalone export when it isn't.
+
+Next: how the [Codex variant](/docs/architecture/codex) reuses all of this with a different engine.

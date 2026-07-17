@@ -1,0 +1,73 @@
+---
+title: Kimi Variant
+description: How the same server binary boots a Kimi Code UI and drives Kimi Code CLI instead of Claude or Codex.
+---
+
+`mkx` is not a fork. It is the **same server and the same web build** as `mcc`, booted with `MACARON_ENGINE=kimi` so it serves the Kimi SPA and drives Kimi Code. This page covers what differs from the Claude path.
+
+## Three Launchers, One Server
+
+<Tabs items={['mcc (Claude)', 'mcx (Codex)', 'mkx (Kimi)']}>
+<Tab value="mcc (Claude)">
+
+`bin/mcc.mjs` parses `--host` / `--port`, defaults to port `7878`, then `import('../server/dist/index.js')`. No engine env means the server serves `index.html`.
+
+```bash
+mcc --port 7878
+# → Claude UI at http://localhost:7878
+```
+
+</Tab>
+<Tab value="mcx (Codex)">
+
+`mcx/bin/mcx.mjs` is the same launcher shape but defaults to port `7979` and ships as its **own self-contained package** — its own `server/dist` + `web/dist` + deps — so `npx mcx@…` installs only mcx, no mcc.
+
+```bash
+mcx --port 7979
+# → Codex UI at http://localhost:7979
+```
+
+</Tab>
+<Tab value="mkx (Kimi)">
+
+`mkx/bin/mkx.mjs` sets `MACARON_ENGINE=kimi`, defaults to port `7980`, and is likewise self-contained — `npx mkx@…` installs only mkx.
+
+```bash
+mkx --port 7980
+# → Kimi UI at http://localhost:7980
+```
+
+</Tab>
+</Tabs>
+
+Because the port defaults are offset (`7878` / `7979` / `7980`), all three can run at once — one browser tab per engine, against one machine.
+
+## Talking to Kimi Code
+
+The Claude path uses the Agent SDK in-process; the Codex path spawns `codex app-server`. The Kimi path spawns the **Kimi Code CLI** per turn (`server/src/lib/kimi-runner.ts`):
+
+```bash
+kimi -p "<prompt>" --output-format stream-json   # new session
+kimi -r session_<uuid> -p "<prompt>" --output-format stream-json   # resume
+```
+
+The child runs with `cwd` set to the session's working directory, in auto-permission mode (no TUI), and exits when the turn ends. Its stdout is one JSON object per line — assistant text, `tool_calls`, tool results — which the server maps onto the shared SSE contract (`session` / `delta` / `tool_use` / `tool_result` / `done`). Aborting a turn just kills the child process.
+
+Two quirks of the stream-json transport:
+
+- **No thinking, no usage.** The stream carries neither reasoning blocks nor token counts, so the Kimi side emits no reasoning events (usage, when shown, is read from `wire.jsonl`'s `step.end` records after the fact).
+- **Late session id.** For a brand-new session the `session_id` only appears in the final `session.resume_hint` meta line. The runner therefore snapshots the workDir's session bucket before spawn and diffs it as soon as output arrives, surfacing the id early; the meta line is the fallback.
+
+## Sessions on Disk
+
+Just as the Claude side reads `~/.claude/projects/**/*.jsonl`, the Kimi side reads `~/.kimi-code/sessions/<workDirKey>/<sessionId>/` (honoring `$KIMI_CODE_HOME`), where `workDirKey` is a per-working-directory bucket like `wd_macaron_28bca57c964e`. `~/.kimi-code/session_index.jsonl` maps `sessionId` → `sessionDir` + `workDir` for fast discovery; the store falls back to scanning the `sessions/wd_*/session_*` tree when the index is missing.
+
+Each session dir holds `state.json` (`title`, `createdAt`, `updatedAt`, `workDir`, …) and the transcript at `agents/main/wire.jsonl` (subagents under `agents/agent-*/wire.jsonl`). Titles come from `state.json`, falling back to a preview of the first user message while the title is still `New Session`.
+
+## Provider Configuration
+
+<Callout type="info">
+  By default the Kimi side runs the **`system` provider**, which inherits your ambient Kimi Code login — no setup needed to start. Custom providers added under **Settings** persist to `~/.kimi-code/macaron-kimi-config.json` and are injected at spawn time through the `KIMI_MODEL_*` env family (`KIMI_MODEL_NAME` / `KIMI_MODEL_API_KEY` / `KIMI_MODEL_BASE_URL` / `KIMI_MODEL_PROVIDER_TYPE`) — an in-memory provider, so your own Kimi Code config is never rewritten.
+</Callout>
+
+Next: how all three packages are [built and published](/docs/architecture/packaging).

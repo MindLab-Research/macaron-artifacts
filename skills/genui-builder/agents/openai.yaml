@@ -1,0 +1,4 @@
+interface:
+  display_name: "GenUI Builder"
+  short_description: "Build streaming GenUI HTML previews"
+  default_prompt: "Use $genui-builder to create a streaming GenUI-capable HTML preview from my UI request."

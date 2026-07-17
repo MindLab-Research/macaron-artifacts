@@ -1,0 +1,9 @@
+# Standalone package: this file marks site as its own pnpm workspace root,
+# so `pnpm install` here does NOT climb into the repo-root workspace (which would
+# skip site's deps entirely). Keep the docs toolchain isolated from the app.
+packages: []
+
+# esbuild ships a postinstall that fetches its native binary; pnpm 10.26+ blocks
+# build scripts by default, so allow it explicitly (matches the repo-root config).
+allowBuilds:
+  esbuild: true

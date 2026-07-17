@@ -1,0 +1,125 @@
+/* Shared borderless Shiki code surface for both the Claude (Session) and Codex chat
+   threads. Fenced code renders through ShikiStreamCodeBlock; these rules style the
+   container, the streamed tokens, and the plaintext fallbacks. */
+
+/* The two chat surfaces expose different palettes: the Claude thread has --code-bg /
+   --surface-3 / --text / --muted; the Codex thread only has --cx-*. Resolve one set of
+   local semantic vars here so a single rule set themes both without either going empty. */
+.chat-shiki-code,
+.chat-inline-code {
+  --chat-code-bg: var(--code-bg, var(--cx-code));
+  --chat-code-fg: var(--text, var(--cx-text));
+  --chat-code-muted: var(--muted, var(--cx-muted));
+  --chat-code-hover-bg: var(--surface-3, var(--cx-hover));
+}
+
+.chat-shiki-code {
+  position: relative;
+  margin: 8px 0 12px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 0;
+  background: var(--chat-code-bg);
+}
+
+.chat-shiki-code__viewport {
+  max-height: 18rem;
+  overflow: auto;
+  padding: 16px;
+  padding-right: 48px;
+}
+
+.chat-shiki-code__copy {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 10;
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chat-code-bg) 60%, transparent);
+  color: var(--chat-code-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.chat-shiki-code__copy:hover { background: var(--chat-code-hover-bg); color: var(--chat-code-fg); }
+.chat-shiki-code__copy:disabled { cursor: not-allowed; opacity: 0.4; }
+/* Visible (not just aria) feedback so LAN-HTTP copy failures don't look like a dead button. */
+.chat-shiki-code__copy[data-copy-state="copied"] { color: var(--good, var(--cx-good)); }
+.chat-shiki-code__copy[data-copy-state="error"] { color: var(--bad, var(--cx-bad)); }
+
+.chat-code-plain {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--chat-code-fg);
+}
+
+.chat-shiki-code .shiki,
+.chat-shiki-code__highlight .shiki {
+  margin: 0;
+  min-height: 100%;
+  /* Shiki writes the theme background inline; force transparent so the card tint shows through. */
+  background: transparent !important;
+  color: var(--chat-code-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.chat-shiki-code .shiki code { font-family: inherit; }
+
+/* The chat surfaces still carry legacy `.md pre` / `.cx-msg-text.md pre` rules (bg,
+   padding, margin, radius) that would double up on our inner <pre> — the Shiki output,
+   the streaming <pre>, and the plaintext fallback. Neutralize them so only the card's
+   own viewport padding applies. Match the surface specificity to win. */
+.ti-text.md .chat-shiki-code pre,
+.cx-msg-text.md .chat-shiki-code pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Dual-theme swap: codeToHtml/dualThemes writes the light color inline on each token
+   and stashes the dark color in --shiki-dark. Under the dark app theme, promote the
+   dark vars so the same DOM re-colors without a re-highlight. */
+:root[data-theme="dark"] .chat-shiki-code .shiki,
+:root[data-theme="dark"] .chat-shiki-code .shiki span {
+  color: var(--shiki-dark, inherit) !important;
+  font-style: var(--shiki-dark-font-style, inherit) !important;
+  font-weight: var(--shiki-dark-font-weight, inherit) !important;
+  text-decoration: var(--shiki-dark-text-decoration, inherit) !important;
+}
+
+.chat-shiki-code .shiki-stream-token-new {
+  animation: chat-shiki-stream-token-fade-in 180ms ease-out both;
+}
+
+@keyframes chat-shiki-stream-token-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Inline code keeps the subtle pill; only fenced blocks get the borderless card. */
+.chat-inline-code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  background: var(--chat-code-bg);
+  color: var(--chat-code-fg);
+  border: 0;
+  padding: 1.5px 6px;
+  border-radius: 4px;
+}

@@ -1,0 +1,125 @@
+---
+title: Overview
+description: A tour of how Macaron Artifacts fits together — one server binary, three SPA entries, and a live GenUI renderer.
+---
+
+Macaron Artifacts is a local WebUI for driving agent sessions from the browser. Under the hood it is a small monorepo: a **Fastify server** that fronts the Claude Agent SDK, Codex (via the `codex app-server` transport by default), and the Kimi Code CLI, a **React SPA** that renders sessions and streams turns, and a **shared** package that pins the wire contract between them. This section walks the whole system top to bottom.
+
+<Callout title="Who this is for">
+  These pages document the *implementation*, not day-to-day usage. If you just want to install and run the WebUI, start with [Usage](/docs/usage). Come here when you want to understand how a turn flows from the browser to the SDK and back, or how the three engines share one binary.
+</Callout>
+
+## The Monorepo
+
+<Files>
+  <Folder name="macaron-artifacts" defaultOpen>
+    <Folder name="shared" defaultOpen>
+      <File name="src/types.ts" />
+      <File name="src/sse.ts" />
+    </Folder>
+    <Folder name="server">
+      <File name="src/index.ts" />
+      <File name="src/config.ts" />
+      <Folder name="src/lib">
+        <File name="claude-runner.ts" />
+        <File name="codex-app-server.ts" />
+        <File name="kimi-runner.ts" />
+        <File name="session-store.ts" />
+        <File name="codex-store.ts" />
+      </Folder>
+      <Folder name="src/routes">
+        <File name="sessions.ts" />
+        <File name="relay.ts" />
+        <File name="codex.ts" />
+        <File name="kimi.ts" />
+      </Folder>
+    </Folder>
+    <Folder name="web">
+      <File name="index.html" />
+      <File name="codex.html" />
+      <File name="kimi.html" />
+      <Folder name="src">
+        <File name="main.tsx" />
+        <Folder name="macaron-vendor" />
+      </Folder>
+    </Folder>
+    <Folder name="bin">
+      <File name="mcc.mjs" />
+    </Folder>
+    <Folder name="mcx">
+      <File name="bin/mcx.mjs" />
+    </Folder>
+    <Folder name="mkx">
+      <File name="bin/mkx.mjs" />
+    </Folder>
+  </Folder>
+</Files>
+
+- **shared** — `types.ts` holds the REST + domain types, `sse.ts` the streaming contract.
+- **server** — `index.ts` is the Fastify bootstrap, `config.ts` the ports / hosts / derived paths. Under `src/lib`, `claude-runner.ts` drives the Claude Agent SDK loop, `codex-app-server.ts` is the Codex app-server client, `kimi-runner.ts` spawns the Kimi Code CLI per turn, `session-store.ts` reads `~/.claude` transcripts and `codex-store.ts` reads `~/.codex` rollouts. `src/routes` mounts the API slices — most under `/api/*` (sessions, codex, kimi, …), plus the provider relay at `/relay/*`.
+- **web** — `index.html` is the Claude SPA entry, `codex.html` the Codex one, and `kimi.html` the Kimi one; `src/main.tsx` bootstraps the router + GenUI runtime, `src/macaron-vendor/` is the vendored GenUI renderer.
+- **bin / mcx / mkx** — `mcc.mjs` is the Claude launcher; the `mcx` and `mkx` members each ship their own self-contained Codex / Kimi launcher.
+
+The workspace (`pnpm-workspace.yaml`) has five members: `shared`, `server`, `web`, `mcx`, and `mkx`. The root package is published as **`mcc`** (the Claude launcher); **`mcx`** and **`mkx`** are self-contained packages that ship their own copy of the built server and web bundles.
+
+## The Big Picture
+
+Three layers, one data contract. The **shared** package sits between the other two: it defines the REST and SSE types both the server and the web build import, so neither side can drift from the wire format.
+
+<Cards>
+  <Card title="Server" href="/docs/architecture/server">
+    A Fastify app that owns the agent runtimes, reads on-disk transcripts, relays provider traffic, and serves the SPA.
+  </Card>
+  <Card title="Web" href="/docs/architecture/web">
+    A React SPA with a canvas of session tiles, a fetch-based SSE reader, and a live GenUI preview.
+  </Card>
+  <Card title="Shared" href="/docs/architecture/server#the-sse-contract">
+    The `types.ts` + `sse.ts` contract both layers depend on — one union type published once, consumed on both ends.
+  </Card>
+</Cards>
+
+The Web layer has three entries that boot from the same server: the Claude UI, the Codex UI, and the Kimi UI. Three cross-cutting concerns span them:
+
+<Cards>
+  <Card title="Codex Variant" href="/docs/architecture/codex">
+    How the same server binary boots a second SPA and drives Codex (default `codex app-server` transport) instead of Claude.
+  </Card>
+  <Card title="Kimi Variant" href="/docs/architecture/kimi">
+    How the same binary boots the Kimi SPA and drives the Kimi Code CLI (`kimi -p --output-format stream-json`).
+  </Card>
+  <Card title="GenUI" href="/docs/architecture/genui">
+    The `render_ui` tool + vendored renderer that compile model-authored TSX to a live component as tokens stream.
+  </Card>
+  <Card title="Packaging" href="/docs/architecture/packaging">
+    Three publishable launchers, prebuilt bundles, and the pkg.pr.new per-commit release flow.
+  </Card>
+</Cards>
+
+## One Binary, Three Front Ends
+
+The single most important design choice: **there is exactly one server binary**, and an environment variable decides which SPA it serves at `/`.
+
+<Steps>
+<Step>
+### Launch picks the engine
+
+`mcc` runs with the default engine (Claude, port `7878`); `mcx` sets `MACARON_ENGINE=codex` and defaults to port `7979`; `mkx` sets `MACARON_ENGINE=kimi` and defaults to port `7980`. All three `import('../server/dist/index.js')` — the same compiled server.
+</Step>
+<Step>
+### The server chooses an SPA entry
+
+At boot the server reads `MACARON_ENGINE` and picks `codex.html`, `kimi.html`, or `index.html` as the `/` document and the SPA fallback. Static assets (JS/CSS chunks) are shared between the entries.
+
+```ts
+const spaEntry = process.env.MACARON_ENGINE === 'codex' ? 'codex.html' : process.env.MACARON_ENGINE === 'kimi' ? 'kimi.html' : 'index.html';
+app.get('/', (_req, reply) => reply.sendFile(spaEntry));
+```
+</Step>
+<Step>
+### The browser loads one runtime
+
+Each HTML entry boots its own React tree — the Claude UI, the ChatGPT-style Codex UI, or the Kimi UI — talking to its engine's `/api/*` namespace over the same SSE contract.
+</Step>
+</Steps>
+
+Read on for how each layer works, starting with the [server](/docs/architecture/server).

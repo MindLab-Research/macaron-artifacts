@@ -1,0 +1,29 @@
+{
+  "name": "macaron",
+  "version": "0.6.0",
+  "description": "Macaron WebUI for Codex — visual session manager, GenUI builder, and multi-provider streaming chat over your ~/.codex/sessions/.",
+  "author": {
+    "name": "Mindverse",
+    "url": "https://macaron.im"
+  },
+  "homepage": "https://macaron.im",
+  "repository": "https://github.com/MindLab-Research/macaron-artifacts",
+  "license": "MIT",
+  "keywords": ["macaron", "genui", "webui", "session-manager", "codex"],
+  "skills": "./codex-skills/",
+  "interface": {
+    "displayName": "Macaron",
+    "shortDescription": "Visual session manager + streaming GenUI for Codex.",
+    "longDescription": "Macaron opens a local WebUI that mirrors your Codex sessions from ~/.codex/sessions/ — browse workspaces, pin sessions to a canvas, continue any turn, and preview streaming GenUI TSX artifacts. Also bundles the genui-builder skill so Codex can author renderable UI from a prompt.",
+    "developerName": "Mindverse",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://macaron.im",
+    "brandColor": "#C96442",
+    "logo": "./assets/mindlab-symbol.svg",
+    "defaultPrompt": [
+      "Launch the Macaron WebUI so I can browse my Codex sessions.",
+      "Use the genui-builder skill to draft a landing page as a streaming TSX artifact."
+    ]
+  }
+}

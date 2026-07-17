@@ -1,0 +1,57 @@
+---
+title: Codex Variant
+description: How the same server binary boots a ChatGPT-style Codex UI and drives Codex instead of Claude.
+---
+
+`mcx` is not a fork. It is the **same server and the same web build** as `mcc`, booted with `MACARON_ENGINE=codex` so it serves the Codex SPA and drives Codex. This page covers what differs from the Claude path.
+
+## Two Launchers, One Server
+
+<Tabs items={['mcc (Claude)', 'mcx (Codex)']}>
+<Tab value="mcc (Claude)">
+
+`bin/mcc.mjs` parses `--host` / `--port`, defaults to port `7878`, then `import('../server/dist/index.js')`. No engine env means the server serves `index.html`.
+
+```bash
+mcc --port 7878
+# → Claude UI at http://localhost:7878
+```
+
+</Tab>
+<Tab value="mcx (Codex)">
+
+`mcx/bin/mcx.mjs` is the same launcher shape but defaults to port `7979` and ships as its **own self-contained package** — its own `server/dist` + `web/dist` + deps — so `npx mcx@…` installs only mcx, no mcc.
+
+```bash
+mcx --port 7979
+# → Codex UI at http://localhost:7979
+```
+
+</Tab>
+</Tabs>
+
+Because the port defaults are offset (`7878` vs `7979`), both can run at once — one browser tab per engine, against one machine.
+
+## Talking to Codex
+
+The Claude path uses the Agent SDK in-process. The Codex path defaults to the **Codex app-server** (`server/src/lib/codex-app-server.ts`), a JSON-RPC client that spawns `codex app-server` over stdio — it carries native command / file / network approvals, which the SDK transport cannot. Set `MACARON_CODEX_TRANSPORT=sdk` to fall back to the in-process `@openai/codex-sdk`. Either way Codex has its own turn primitives that the server maps onto the shared SSE contract:
+
+| event | meaning |
+| --- | --- |
+| `codex_plan` | A turn plan card with per-step status (pending / inProgress / completed), replaced monotonically as the plan updates. |
+| `codex_approval_request` | A native command / file / network approval, with the decisions Codex offered for this specific request. |
+| `codex_approval_resolved` | The request is no longer actionable — answered, turn ended, or cleared. |
+
+Approvals are answered by POSTing the chosen `CodexDecision` (`accept` / `acceptForSession` / `decline` / `cancel`) back to `/api/codex/threads/:sid/approval`. The client renders a decision card and disables it once resolved.
+
+## Sessions on Disk
+
+Just as the Claude side reads `~/.claude/projects/**/*.jsonl`, the Codex side reads **Codex rollouts** under `~/.codex/sessions/**`. The same `session-watcher` tails both trees, so Codex sessions started in a terminal also surface live in the WebUI.
+
+## Provider Configuration
+
+<Callout type="info">
+  By default the Codex side runs the **`system` provider**, which inherits your `~/.codex/config.toml` unchanged (endpoint, model, auth) — no setup needed to start. Filling in a custom **Base URL / API Key / Model** under **Settings** is optional; those extra providers persist to `~/.claude/macaron-codex-config.json` (distinct from the Claude relay's `~/.claude/macaron-config.json`) without ever rewriting your `config.toml`. Reasoning effort and sandbox mode are runtime knobs set there too.
+</Callout>
+
+Next: how both packages are [built and published](/docs/architecture/packaging).

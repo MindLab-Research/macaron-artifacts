@@ -1,0 +1,70 @@
+---
+title: Web
+description: The React SPA — two entries, the GenUI runtime bootstrap, a fetch-based SSE reader, and the session canvas.
+---
+
+The front end (`web/`) is a Vite + React SPA. It has no server-side rendering — the Fastify server just hands the browser one of two prebuilt HTML documents and the app takes over from there with a hash router.
+
+## Two Entries, One Build
+
+`web/vite.config.ts` declares **two Rollup inputs**, so a single `vite build` emits two SPA bundles that share their asset chunks:
+
+```ts
+input: {
+  main: path.resolve(__dirname, 'index.html'),   // Claude UI
+  codex: path.resolve(__dirname, 'codex.html'),  // Codex UI
+}
+```
+
+The server picks which one is `/` at boot (see [Overview](/docs/architecture/overview)). In dev, Vite serves on `:5273` (`strictPort`) and proxies `/api` to the server on `:7878`.
+
+<Callout title="The @ alias points at vendored source">
+  `@` resolves to `web/src/macaron-vendor` — the vendored Macaron GenUI source (`source.tsx`, `components/ui/*`). When Mindverse publishes `@macaron/ui` on npm, the plan is to swap these imports and delete the vendor dir; the intent is flagged in `main.tsx` and the vendor `README.md`.
+</Callout>
+
+## Runtime Bootstrap
+
+The three entries bootstrap GenUI differently. The **Claude** entry (`web/src/main.tsx`) stands up the whole GenUI runtime *before* the app renders — model-authored TSX previews are core to that UI, so the globals must exist up front. The **Codex** and **Kimi** entries (`web/src/codex/main.tsx`, `web/src/kimi/main.tsx`) deliberately do not: they stay small chat-focused bundles and **lazy-load** the GenUI runtime (`React.lazy` + `Suspense` in their chat views, ~500 KB gzip) only when a `render_ui` card actually needs to render.
+
+The steps below describe the Claude bootstrap:
+
+<Steps>
+<Step>
+### Expose React + Macaron globals
+
+React, the JSX runtimes, ReactDOM, the vendored Macaron UI (`MacaronUI`, `MacaronCharts`, `MacaronLucide`) and `motion/react` are imported as namespaces and published to the page so streamed GenUI modules can resolve them without a bundler.
+</Step>
+<Step>
+### Boot the UnoCSS runtime
+
+`@unocss/runtime` with `presetWind3` + animations generates utility classes from the DOM at runtime, mirroring Macaron's own `uno.config.ts`. A Tailwind reset is imported first so native control styles don't leak into previews.
+</Step>
+<Step>
+### Mount the hash router
+
+`createHashRouter` wires the views — Dashboard, Workspace, Session, Settings, Analytics, and more — under the `App` shell.
+</Step>
+</Steps>
+
+## Streaming a Turn
+
+The client reads SSE with **`fetch` + a streaming body reader**, not `EventSource` (`web/src/lib/sse.ts`). That's deliberate: `EventSource` can't send a request body or custom headers, and turns are POSTs carrying the message + attachments. The reader parses the same `SessionStreamEvent` union the server publishes and dispatches into a live store that the views subscribe to.
+
+## The Session Canvas
+
+The Workspace view (`web/src/views/Workspace.tsx` + `web/src/lib/canvas.ts`) is a free-form canvas of session tiles rather than a list:
+
+<Cards>
+  <Card title="Pin & arrange">
+    Pin a session with `+`; drag the grip to reposition, pull the bottom-right corner to resize, click a tile to focus.
+  </Card>
+  <Card title="Live tiles">
+    Each tile tails its session over SSE, so thinking, tool calls, and GenUI previews update in place as a turn runs.
+  </Card>
+</Cards>
+
+## Auth Gate
+
+When the server arms a token (non-loopback bind), `web/src/components/AuthGate.tsx` intercepts the app: it reads the token from the `?token=` connect URL, stores it, and attaches it to every `/api` request. On loopback with no token, the gate is a no-op.
+
+Next: how the [GenUI preview](/docs/architecture/genui) compiles and renders model-authored TSX live.

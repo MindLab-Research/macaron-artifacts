@@ -1,0 +1,12 @@
+packages:
+  - 'shared'
+  - 'server'
+  - 'web'
+  - 'mcx'
+  - 'mkx'
+# partial-tsx is a URL subdep of partial-react (our own pkg.pr.new package), already pinned in the lockfile and trusted.
+# pnpm 10.26+ defaults blockExoticSubdeps=true, which blocks URL subdeps; allow it explicitly here.
+blockExoticSubdeps: false
+allowBuilds:
+  esbuild: true
+  node-pty: true

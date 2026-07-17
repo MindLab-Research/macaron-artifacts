@@ -1,0 +1,101 @@
+---
+title: Server
+description: The Fastify server — bootstrap, auth, the Claude Agent SDK loop, the provider relay, and the SSE stream.
+---
+
+The server is a single Fastify app (`server/src/index.ts`). It owns the agent runtimes, exposes a REST + SSE API (most routes under `/api/*`, with the provider relay mounted separately at `/relay/*`), relays provider traffic for the Claude CLI, and serves the SPA. Everything runs from one process, bound to loopback by default.
+
+## Configuration
+
+The core tunables (port, host, auth token, and optional custom provider settings) live in `server/src/config.ts` and read from the environment, so the launchers and `start.sh` can steer behaviour without touching code. A handful of others are read directly where they're used rather than centralized here — e.g. `MACARON_LOG_LEVEL`, `MACARON_ENGINE`, and `MACARON_CODEX_TRANSPORT`.
+
+| name | source | default | meaning |
+| --- | --- | --- | --- |
+| `PORT` | `MACARON_PORT` | `7878` | Listen port — Claude default; mcx uses `7979`, mkx uses `7980`. |
+| `HOST` | `MACARON_HOST` | `127.0.0.1` | Bind address. A non-loopback host auto-arms auth. |
+| `AUTH_TOKEN` | `MACARON_AUTH_TOKEN` | `""` | Shared token gating the API when reachable off-box. |
+| `MACARON_MODEL` | `MACARON_MODEL` | `""` | Optional model id for a custom provider. |
+
+`CLAUDE_PROJECTS` (`~/.claude/projects`) and `CODEX_SESSIONS` (`~/.codex/sessions`) are **not** environment tunables — they are fixed paths derived from `$HOME` in `config.ts`, pointing at where Claude Code and Codex already write their transcripts and rollouts. `KIMI_SESSIONS` (`~/.kimi-code/sessions`) works the same way, except its root honors `$KIMI_CODE_HOME` like the Kimi CLI itself. The store layer reads them; nothing overrides them.
+
+## Boot Sequence
+
+`server/src/index.ts` wires the app in a fixed order — plugins, then routes, then cache warm-up, then listen.
+
+<Steps>
+<Step>
+### Build the Fastify instance
+
+A logger with a custom request serializer that **redacts `?token=` out of every logged URL** (share links would otherwise leak into logs), `ignoreTrailingSlash`, a 2 MB body limit (GenUI prompts grow), and `maxParamLength: 4000` so deep worktree paths encoded as route params don't 414.
+</Step>
+<Step>
+### Arm auth
+
+`resolveToken(HOST, AUTH_TOKEN)` returns a token; if the server is bound to a **non-loopback** host with no token set, it generates one and prints a `?token=…` connect string straight to stdout (never to the structured log). An `onRequest` hook enforces it.
+</Step>
+<Step>
+### Register routes
+
+Every `register*Routes` call mounts a slice of the API — sessions, settings, codex, git, search, agents, terminal, and more — mostly under `/api/*`. The provider relay is the exception: it lives at `/relay/anthropic/...` (see below), not `/api/*`. All under one encapsulated plugin scope.
+</Step>
+<Step>
+### Serve the SPA
+
+If `web/dist` exists, `@fastify/static` serves assets with `index: false` so the server can route `/` itself and pick the engine's SPA entry. In dev (`vite` on `:5273`) the dist is absent and the server runs API-only.
+</Step>
+<Step>
+### Warm caches and listen
+
+Settings, worktrees, permission rules, codex config, labels, schedules, and share caches warm before `app.listen`. After binding, it schedules the GenUI type-check warm-up and the search-index build on `setImmediate` — best-effort, so those costs are usually paid before the first turn, but a request arriving immediately after bind can still race the warm-up.
+</Step>
+</Steps>
+
+## The Claude Turn Loop
+
+`server/src/lib/claude-runner.ts` wraps the Claude Agent SDK. `runClaude` is an **async generator** that yields a `RunnerEvent` for every SDK message, which the route layer maps onto the SSE contract.
+
+```ts
+export type RunnerEvent =
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'delta'; text: string }
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'tool_use'; id: string; name: string; input: unknown }
+  | { kind: 'tool_result'; tool_use_id: string; text: string; isError: boolean }
+  | { kind: 'permission_request'; id: string; toolName: string; input: unknown }
+  // …usage, message, codex_* , error, done
+```
+
+Tool permissions flow through a `canUseTool` callback: when the SDK wants to run a tool that needs approval, the runner emits a `permission_request`, parks the turn, and waits for the client to POST a decision back before resuming. The SDK's default 60 s MCP-tool timeout is raised to **5 minutes** at process start (`CLAUDE_CODE_STREAM_CLOSE_TIMEOUT`) because a complex GenUI render can take 30–120 s.
+
+## The Provider Relay
+
+The Claude CLI expects an Anthropic-shaped API. To point it at a third-party provider, the server runs a reverse proxy at `/relay/anthropic/:providerId/v1/...` (`server/src/routes/relay.ts`).
+
+<Callout type="info" title="Why a relay and not just a base URL swap">
+  The CLI probes several `/v1/` endpoints at startup (models, org) to validate the session. If those 404, it aborts with a misleading "issue with the selected model" error — even when `/v1/messages` would work. So the relay **synthesizes** `/v1/models` and `/v1/models/<name>` from the active provider config. `/v1/messages` is **not** forwarded verbatim: the relay rewrites `model` to the provider's id and lifts any `messages[i].role === 'system'` entries into the top-level `system` field for compatibility, then streams the response back. Every other probe returns an empty `{}` 200.
+</Callout>
+
+Active provider config is persisted to `~/.claude/macaron-config.json` via `settings-store.ts` and edited from the Settings page.
+
+## The SSE Contract
+
+Every streaming surface — starting a session, sending a message, tailing a live turn — speaks one union type defined **once** in `shared/src/sse.ts` and consumed by both the server (publisher) and the client (reader).
+
+| event(s) | meaning |
+| --- | --- |
+| `delta` / `reasoning` | Assistant prose vs. the thinking stream, kept distinct so the client can collapse reasoning as its own block. |
+| `user-text` / `starting` / `meta` | Bookend a turn. |
+| `tool_use` → `tool_input_delta` / `tool_input_done` → `tool_result` | Tool lifecycle with streamed args. |
+| `permission_request` / `permission_resolved` | Permission gates riding alongside the tool lifecycle. |
+| `codex_plan` | A monotonically-updated Codex plan card. |
+| `codex_approval_request` / `codex_approval_resolved` | Codex command/file/network approvals — see [Codex Variant](/docs/architecture/codex). |
+| `usage` / `event` / `log` / `warn` / `error` | Telemetry: output/thinking tokens and diagnostics. |
+| `done` / `live-end` | Terminal `done` (with exit code); `live-end` closes a tailing connection. |
+
+A separate `SystemEvent` stream (`GET /api/events`) pushes a debounced `sessions-changed` nudge whenever a transcript file changes on disk — so sessions started in a plain terminal surface live in the UI instead of on the next slow poll.
+
+## Reading Sessions From Disk
+
+The WebUI does not own a database. `session-store.ts` reads the JSONL transcripts Claude Code already writes under `~/.claude/projects/**/*.jsonl`, `codex-store.ts` parses the Codex rollouts under `~/.codex/sessions/**`, and `kimi-store.ts` reads the Kimi Code `wire.jsonl` + `state.json` under `~/.kimi-code/sessions/**` (via `session_index.jsonl` when present); all three project into the shared session/turn types, and a `session-watcher` tails the trees for changes. This is why the WebUI shows sessions you started outside the browser.
+
+Next: the [web front end](/docs/architecture/web).

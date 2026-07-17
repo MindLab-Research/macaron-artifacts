@@ -1,0 +1,89 @@
+---
+title: Usage
+description: Install the Macaron WebUI on Claude Code, Codex, and Kimi Code, open it, and drive sessions from the browser.
+---
+
+A WebUI that installs on Claude Code, Codex, and Kimi Code — run all three at once. After install, launch it from the CLI with one line:
+
+- Claude → [http://localhost:7878](http://localhost:7878)
+- Codex → [http://localhost:7979](http://localhost:7979)
+- Kimi → [http://localhost:7980](http://localhost:7980)
+
+## Install
+
+### Claude Code
+
+```
+/plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
+/plugin install macaron@macaron
+```
+
+Then open it in a session with `/macaron`.
+
+### Codex
+
+```bash
+codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
+codex plugin add macaron@macaron
+```
+
+Then say `open macaron web ui` in a session to open it.
+
+### Kimi Code
+
+```
+/plugins install https://github.com/MindLab-Research/macaron-artifacts
+/reload
+```
+
+Then open it in a session with `/macaron:macaron`.
+
+### Without Installing the Plugin — One `bunx` Line
+
+The published tarball ships the prebuilt server + web bundles as three independent packages — `mcc` (Claude WebUI, port `7878`), `mcx` (Codex WebUI, port `7979`), and `mkx` (Kimi WebUI, port `7980`). Launch any of them in one command:
+
+```bash
+bunx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
+bunx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
+bunx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
+
+npx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>    # Claude → http://localhost:7878
+npx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>    # Codex  → http://localhost:7979
+npx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>    # Kimi   → http://localhost:7980
+```
+
+The commands are pinned to this build's commit; swap in any other commit on `main` to pull that build. Each launcher boots the same server with `MACARON_ENGINE` set (`codex` / `kimi`; unset = Claude) and its own default port. All bins accept `--host` / `--port`; run `--help` for all flags.
+
+## Using It
+
+Once inside the WebUI:
+
+- Click a workspace in the sidebar to enter its canvas; pin a session with `+`
+- On the canvas: drag the grip to reposition, pull the bottom-right corner to resize, click a tile to focus
+- Input box: `Enter` sends · `Shift+Enter` for a newline · `↑`/`↓` cycles history · paste an image to attach it
+
+The Codex side works out of the box: by default it uses the `system` provider, which inherits your `~/.codex/config.toml` (endpoint, model, auth). Filling in a custom Base URL / API Key / Model under **Settings** is optional — only needed to point Codex at a different provider. The Kimi side likewise defaults to your ambient Kimi Code login; custom providers set under **Settings** persist to `~/.kimi-code/macaron-kimi-config.json`.
+
+## Updating
+
+### Claude Code
+
+```
+/plugin update macaron
+```
+
+### Codex
+
+```bash
+codex plugin marketplace upgrade macaron   # pull the latest version
+codex plugin remove macaron@macaron
+codex plugin add macaron@macaron           # reinstall
+```
+
+### Kimi Code
+
+Open `/plugins`, select `macaron` on the **Installed** tab, and press `Enter` to install the available update — then `/reload`.
+
+## Feedback
+
+[github.com/MindLab-Research/macaron-artifacts/issues](https://github.com/MindLab-Research/macaron-artifacts/issues)
