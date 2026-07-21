@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "id": "checkout-latency",
+  "duration": 24,
+  "prompt": "Trace the checkout slowdown, patch the hot path, and show the result as a compact incident dashboard.",
+  "workspace": {
+    "project": "replay-checkout",
+    "cwd": "/workspace/checkout-service",
+    "name": "checkout-service",
+    "sessionId": "session-checkout-latency",
+    "title": "Checkout latency review",
+    "gitBranch": "agent/eve/checkout-latency",
+    "startedAt": 1784264400000
+  },
+  "events": [
+    {
+      "at": 0,
+      "event": { "type": "meta", "cwd": "/workspace/checkout-service", "sessionId": "session-checkout-latency", "startedAt": 1784264400000 }
+    },
+    {
+      "at": 0.35,
+      "event": { "type": "user-text", "text": "Trace the checkout slowdown, patch the hot path, and show the result as a compact incident dashboard." }
+    },
+    {
+      "at": 0.9,
+      "event": { "type": "delta", "text": "I’ll inspect the route, establish a baseline, then render the evidence before and after the fix." }
+    },
+    {
+      "at": 1.8,
+      "event": { "type": "tool_use", "id": "tool-read", "name": "Read", "input": { "file_path": "/workspace/checkout-service/src/routes/checkout.ts" } }
+    },
+    {
+      "at": 2.5,
+      "event": { "type": "tool_result", "tool_use_id": "tool-read", "text": "Loaded 214 lines. Cache guard runs after pricing hydration.", "isError": false }
+    },
+    {
+      "at": 3.1,
+      "event": { "type": "tool_use", "id": "tool-test", "name": "Bash", "input": { "command": "pnpm test checkout --reporter=dot" } }
+    },
+    {
+      "at": 3.8,
+      "event": { "type": "tool_result", "tool_use_id": "tool-test", "text": "18 passed · baseline p95 842 ms", "isError": false }
+    },
+    {
+      "at": 4.35,
+      "event": { "type": "delta", "text": " The baseline confirms pricing hydration dominates the hot path." }
+    },
+    {
+      "at": 4.8,
+      "event": { "type": "tool_use", "id": "ui-baseline", "name": "mcp__macaron__render_ui", "input": {} }
+    },
+    {
+      "at": 5,
+      "renderUi": {
+        "id": "ui-baseline",
+        "duration": 3.8,
+        "chunks": 24,
+        "codeLines": [
+          "import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Stack } from '$macaron/ui';",
+          "const metrics = [{ label: 'p50', value: '188 ms' }, { label: 'p95', value: '842 ms' }, { label: 'errors', value: '0.7%' }];",
+          "const regions = [{ label: 'us-east', value: 84 }, { label: 'eu-west', value: 58 }, { label: 'ap-south', value: 43 }];",
+          "export default function App() {",
+          "  return (",
+          "    <Card className='w-full max-w-3xl'>",
+          "      <CardHeader className='pb-3'>",
+          "        <div className='flex items-start justify-between gap-3'>",
+          "          <div><CardTitle>Checkout latency</CardTitle><CardDescription>Live baseline by region</CardDescription></div>",
+          "          <Badge variant='outline'>Streaming</Badge>",
+          "        </div>",
+          "      </CardHeader>",
+          "      <CardContent>",
+          "        <Stack className='gap-4'>",
+          "          <div className='grid grid-cols-3 gap-3'>",
+          "            {metrics.map((metric) => <div key={metric.label} className='rounded-lg border p-3'><div className='text-xs opacity-60'>{metric.label}</div><div className='mt-1 text-xl font-semibold'>{metric.value}</div></div>)}",
+          "          </div>",
+          "          <Stack className='gap-2'>",
+          "            {regions.map((region) => <div key={region.label}><div className='mb-1 flex justify-between text-xs'><span>{region.label}</span><span>{region.value}%</span></div><div className='h-2 overflow-hidden rounded bg-stone-100'><div className='h-full rounded bg-orange-500' style={{ width: region.value + '%' }} /></div></div>)}",
+          "          </Stack>",
+          "        </Stack>",
+          "      </CardContent>",
+          "    </Card>",
+          "  );",
+          "}"
+        ]
+      }
+    },
+    {
+      "at": 9,
+      "event": { "type": "tool_result", "tool_use_id": "ui-baseline", "text": "rendered", "isError": false }
+    },
+    {
+      "at": 9.7,
+      "event": { "type": "tool_use", "id": "tool-edit", "name": "Edit", "input": { "file_path": "/workspace/checkout-service/src/routes/checkout.ts", "old_string": "hydratePricing(); checkCache();", "new_string": "checkCache(); hydratePricing();" } }
+    },
+    {
+      "at": 10.5,
+      "event": { "type": "tool_result", "tool_use_id": "tool-edit", "text": "Updated checkout.ts and added a stale-key regression test.", "isError": false }
+    },
+    {
+      "at": 11.2,
+      "event": { "type": "tool_use", "id": "tool-verify", "name": "Bash", "input": { "command": "pnpm test checkout && pnpm bench checkout" } }
+    },
+    {
+      "at": 12,
+      "event": { "type": "tool_result", "tool_use_id": "tool-verify", "text": "19 passed · p95 842 ms → 236 ms", "isError": false }
+    },
+    {
+      "at": 12.65,
+      "event": { "type": "delta", "text": "The cache guard now bypasses the expensive hydration path. I’m rendering the verified result." }
+    },
+    {
+      "at": 13.2,
+      "event": { "type": "tool_use", "id": "ui-verified", "name": "mcp__macaron__render_ui", "input": {} }
+    },
+    {
+      "at": 13.4,
+      "renderUi": {
+        "id": "ui-verified",
+        "duration": 5.5,
+        "chunks": 32,
+        "codeLines": [
+          "import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Stack } from '$macaron/ui';",
+          "const metrics = [{ label: 'p95', value: '236 ms', hint: '-72%' }, { label: 'tests', value: '19 / 19', hint: 'passed' }, { label: 'errors', value: '0.2%', hint: '-0.5 pp' }];",
+          "const checks = [{ label: 'unit', value: 100 }, { label: 'integration', value: 100 }, { label: 'benchmark', value: 92 }];",
+          "export default function App() {",
+          "  return (",
+          "    <Card className='w-full max-w-3xl'>",
+          "      <CardHeader className='pb-3'>",
+          "        <div className='flex items-start justify-between gap-3'>",
+          "          <div><CardTitle>Patch verified</CardTitle><CardDescription>Checkout hot path after cache-first lookup</CardDescription></div>",
+          "          <Badge>Ready</Badge>",
+          "        </div>",
+          "      </CardHeader>",
+          "      <CardContent>",
+          "        <Stack className='gap-4'>",
+          "          <div className='grid grid-cols-3 gap-3'>",
+          "            {metrics.map((metric) => <div key={metric.label} className='rounded-lg border p-3'><div className='text-xs opacity-60'>{metric.label}</div><div className='mt-1 text-xl font-semibold'>{metric.value}</div><div className='text-xs text-emerald-700'>{metric.hint}</div></div>)}",
+          "          </div>",
+          "          <Stack className='gap-2'>",
+          "            {checks.map((check) => <div key={check.label}><div className='mb-1 flex justify-between text-xs'><span>{check.label}</span><span>{check.value}%</span></div><div className='h-2 overflow-hidden rounded bg-stone-100'><div className='h-full rounded bg-emerald-600' style={{ width: check.value + '%' }} /></div></div>)}",
+          "          </Stack>",
+          "          <div className='rounded-lg bg-stone-50 p-3 text-sm'>checkout.ts <strong>+8 -5</strong> · checkout.test.ts <strong>+24</strong></div>",
+          "        </Stack>",
+          "      </CardContent>",
+          "    </Card>",
+          "  );",
+          "}"
+        ]
+      }
+    },
+    {
+      "at": 19.1,
+      "event": { "type": "tool_result", "tool_use_id": "ui-verified", "text": "rendered", "isError": false }
+    },
+    {
+      "at": 20,
+      "event": { "type": "delta", "text": " p95 is down 72%, all 19 tests pass, and the rendered UI above is the same live component the user interacted with." }
+    },
+    {
+      "at": 23.999,
+      "event": { "type": "done", "exitCode": 0 }
+    }
+  ]
+}

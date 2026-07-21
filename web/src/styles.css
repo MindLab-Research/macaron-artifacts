@@ -598,6 +598,20 @@ textarea:focus, select:focus, input:focus {
   font-size: 11.5px;
   color: var(--muted);
 }
+.replay-controls { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.replay-button { width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.replay-button:hover { background: var(--surface-2); color: var(--text); }
+.replay-settings { position: relative; }
+.replay-settings > summary { list-style: none; }
+.replay-settings > summary::-webkit-details-marker { display: none; }
+.replay-settings-menu { position: absolute; z-index: 20; top: 34px; left: 0; width: 210px; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-lg); display: grid; gap: 6px; }
+.replay-settings-menu label { color: var(--text-2); font-size: 11px; font-weight: 600; }
+.replay-settings-menu select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.replay-settings-menu span { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.replay-controls input[type='range'] { width: clamp(72px, 12vw, 150px); accent-color: var(--accent); }
+.replay-count { color: var(--muted); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+.session-replay-bar { display: flex; justify-content: flex-end; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.replay-speed { width: 34px; font-size: 11px; }
 .load-earlier {
   align-self: center;
   padding: 6px 14px;
@@ -768,8 +782,48 @@ textarea:focus, select:focus, input:focus {
   word-break: break-all;
   min-width: 0;
 }
+.ti-tool-input {
+  color: var(--text-2);
+}
+/* In a tool row, Shiki uses the exact same text column and metrics as plain output. */
+.ti-tool-input .chat-shiki-code {
+  min-width: 0;
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.ti-tool-input .chat-shiki-code__viewport {
+  max-height: none;
+  overflow: visible;
+  padding: 0 28px 0 0;
+}
+.ti-tool-input.is-collapsed .chat-shiki-code__viewport {
+  /* 2 lines × 12px × 1.55, matching .ti-tool-body pre below. */
+  max-height: 37.2px;
+  overflow: hidden;
+}
+.ti-tool-input .chat-shiki-code .shiki,
+.ti-tool-input .chat-code-plain {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.ti-tool-input .chat-shiki-code__copy {
+  top: 0;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+}
+/* Standalone expand/collapse toggle (sits under both input and output). */
+.ti-tool-toggle {
+  padding-left: 0;
+}
+.ti-tool-toggle-row { margin-top: 0; }
+.ti-tool-toggle-row > .ti-rail { visibility: hidden; }
 .ti-tool-out {
   display: flex;
+  align-items: flex-start;
   gap: 6px;
   padding-left: 10px;
   margin-top: 2px;
@@ -4973,6 +5027,7 @@ textarea:focus, select:focus, input:focus {
 @media (max-width: 768px) {
   /* Stack tree above editor: a fixed 280px tree would squeeze the editor to
      an unusable sliver on phones. */
+  .fx { height: 100dvh; } /* 100vh runs under mobile browser chrome */
   .fx-body { flex-direction: column; }
   .fx-tree {
     width: 100%;
@@ -5365,7 +5420,10 @@ textarea:focus, select:focus, input:focus {
   color: var(--muted);
   pointer-events: none;
 }
-.fp-input {
+/* Descendant selector on purpose: the bare `.fp-input` class loses specificity
+   to the generic `input[type="text"]` rule above, which collapses the left
+   padding and makes the search icon overlap the text. */
+.fp-search .fp-input {
   flex: 1;
   width: 100%;
   height: 36px;

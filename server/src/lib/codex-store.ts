@@ -224,9 +224,11 @@ export async function readCodexSessionMessages(sid: string): Promise<SessionDeta
   let cwd = '';
   let gitBranch = '';
   const messages: Message[] = [];
+  const replayMessages: Message[] = [];
   // Track the last assistant message so subsequent tool_use / thinking
   // blocks land on the same bubble instead of forcing a new one.
   let currentAssistant: Message | null = null;
+  let sourceLine = 0;
   const ensureAssistant = (): Message => {
     if (currentAssistant) return currentAssistant;
     const m: Message = { role: 'assistant', blocks: [] };
@@ -236,6 +238,7 @@ export async function readCodexSessionMessages(sid: string): Promise<SessionDeta
   };
 
   for (const line of raw.split('\n')) {
+    sourceLine++;
     const t = line.trim();
     if (!t) continue;
     let o: { type?: string; payload?: unknown; timestamp?: string };
@@ -262,7 +265,9 @@ export async function readCodexSessionMessages(sid: string): Promise<SessionDeta
             role: 'user',
             blocks: [{ kind: 'text', text }],
             timestamp: o.timestamp,
+            sourceLine,
           });
+          replayMessages.push(messages[messages.length - 1]!);
         }
       } else if (kind === 'agent_message') {
         const text = String((p as { message?: string }).message || '').trim();
@@ -270,11 +275,16 @@ export async function readCodexSessionMessages(sid: string): Promise<SessionDeta
         const m = ensureAssistant();
         m.blocks.push({ kind: 'text', text });
         m.timestamp ??= o.timestamp;
+        m.sourceLine ??= sourceLine;
+        replayMessages.push({ role: 'assistant', blocks: [{ kind: 'text', text }], timestamp: o.timestamp, sourceLine });
       } else if (kind === 'agent_reasoning') {
         const text = String((p as { text?: string }).text || '').trim();
         if (!text) continue;
         const m = ensureAssistant();
+        m.timestamp ??= o.timestamp;
+        m.sourceLine ??= sourceLine;
         m.blocks.push({ kind: 'thinking', text });
+        replayMessages.push({ role: 'assistant', blocks: [{ kind: 'thinking', text }], timestamp: o.timestamp, sourceLine });
       }
       continue;
     }
@@ -298,7 +308,10 @@ export async function readCodexSessionMessages(sid: string): Promise<SessionDeta
           try { input = JSON.parse(input); } catch { /* keep as string */ }
         }
         const m = ensureAssistant();
+        m.timestamp ??= o.timestamp;
+        m.sourceLine ??= sourceLine;
         m.blocks.push({ kind: 'tool_use', id: callId, name, input });
+        replayMessages.push({ role: 'assistant', blocks: [{ kind: 'tool_use', id: callId, name, input }], timestamp: o.timestamp, sourceLine });
       } else if (kind === 'function_call_output') {
         const callId = String(p.call_id || '');
         let text = '';
@@ -309,27 +322,36 @@ export async function readCodexSessionMessages(sid: string): Promise<SessionDeta
           text = o2.output || o2.content || o2.text || JSON.stringify(output);
         }
         const m = ensureAssistant();
+        m.timestamp ??= o.timestamp;
+        m.sourceLine ??= sourceLine;
         m.blocks.push({
           kind: 'tool_result',
           toolUseId: callId,
           text: text.slice(0, 8000),
         });
+        replayMessages.push({ role: 'assistant', blocks: [{ kind: 'tool_result', toolUseId: callId, text: text.slice(0, 8000) }], timestamp: o.timestamp, sourceLine });
       } else if (kind === 'custom_tool_call') {
         const name = String(p.name || 'custom');
         const callId = String(p.call_id || `codex-${messages.length}`);
         const m = ensureAssistant();
+        m.timestamp ??= o.timestamp;
+        m.sourceLine ??= sourceLine;
         m.blocks.push({ kind: 'tool_use', id: callId, name, input: p.input ?? {} });
+        replayMessages.push({ role: 'assistant', blocks: [{ kind: 'tool_use', id: callId, name, input: p.input ?? {} }], timestamp: o.timestamp, sourceLine });
       } else if (kind === 'custom_tool_call_output') {
         const callId = String(p.call_id || '');
         const text = typeof p.output === 'string'
           ? p.output
           : JSON.stringify(p.output ?? '').slice(0, 8000);
         const m = ensureAssistant();
+        m.timestamp ??= o.timestamp;
+        m.sourceLine ??= sourceLine;
         m.blocks.push({
           kind: 'tool_result',
           toolUseId: callId,
           text: text.slice(0, 8000),
         });
+        replayMessages.push({ role: 'assistant', blocks: [{ kind: 'tool_result', toolUseId: callId, text: text.slice(0, 8000) }], timestamp: o.timestamp, sourceLine });
       }
       // response_item / message / reasoning duplicate the event_msg
       // stream we already consumed — skip.
@@ -345,6 +367,7 @@ export async function readCodexSessionMessages(sid: string): Promise<SessionDeta
     gitBranch,
     title: getCodexTitle(sid),
     messages,
+    replayMessages,
     truncated: false,
     totalBytes: st.size,
   };

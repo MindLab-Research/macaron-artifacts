@@ -488,7 +488,7 @@ export async function resolveSessionCwd(project: string, sid: string): Promise<s
   const target = `${sid}.jsonl`;
   try {
     const primary = await readSessionSummary(path.join(CLAUDE_PROJECTS, project, target));
-    if (primary?.cwd) return primary.cwd;
+    if (primary?.cwd && (await fs.stat(primary.cwd)).isDirectory()) return primary.cwd;
   } catch { /* fall through to cross-project scan */ }
   try {
     const projectDirs = await fs.readdir(CLAUDE_PROJECTS);
@@ -496,11 +496,15 @@ export async function resolveSessionCwd(project: string, sid: string): Promise<s
       if (dir === project) continue; // already tried
       try {
         const meta = await readSessionSummary(path.join(CLAUDE_PROJECTS, dir, target));
-        if (meta?.cwd) return meta.cwd;
+        if (meta?.cwd && (await fs.stat(meta.cwd)).isDirectory()) return meta.cwd;
       } catch { /* keep looking */ }
     }
   } catch { /* CLAUDE_PROJECTS unreadable — fall through */ }
-  return decodeClaudeProjectName(project) || HOME || '/tmp';
+  const projectCwd = await resolveProjectCwd(project);
+  try {
+    if (projectCwd && (await fs.stat(projectCwd)).isDirectory()) return projectCwd;
+  } catch { /* stale project cwd — use a guaranteed live directory */ }
+  return HOME || '/tmp';
 }
 
 // Resolve a claude project name to its working directory. Prefer the cwd
@@ -684,7 +688,9 @@ async function parseTranscriptFile(filePath: string): Promise<{
   let thinkChars = 0;
   let toolCallChars = 0;
   let toolResultChars = 0;
+  let sourceLine = 0;
   for (const line of raw.split('\n')) {
+    sourceLine++;
     if (!line.trim()) continue;
     try {
       const o = JSON.parse(line);
@@ -699,6 +705,7 @@ async function parseTranscriptFile(filePath: string): Promise<{
           blocks: [{ kind: 'system_event', eventType: 'summary', text: o.summary }],
           timestamp: o.timestamp,
           uuid: o.uuid,
+          sourceLine,
         });
         continue;
       }
@@ -726,6 +733,7 @@ async function parseTranscriptFile(filePath: string): Promise<{
                 blocks: [{ kind: 'system_event', eventType: 'resume', text: t }],
                 timestamp: o.timestamp,
                 uuid: o.uuid,
+                sourceLine,
               });
             }
           }
@@ -775,6 +783,7 @@ async function parseTranscriptFile(filePath: string): Promise<{
           model: o.message?.model,
           timestamp: o.timestamp,
           uuid: o.uuid,
+          sourceLine,
         });
         if (o.type === 'assistant' && o.message?.usage) {
           const u = o.message.usage;
@@ -855,6 +864,7 @@ export async function readSessionMessages(project: string, sid: string): Promise
     label: labels[sid],
     title,
     messages,
+    replayMessages: messages,
     truncated,
     totalBytes,
     latestUsage,

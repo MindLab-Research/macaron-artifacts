@@ -26,6 +26,9 @@ function fmtWhen(ms: number | null): string {
 
 export function Schedules() {
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
+  // This launcher only runs its own engine's schedules — the others' SDKs aren't
+  // installed. Lock the form to it so a foreign schedule can't be created.
+  const [engine, setEngine] = useState<SessionKind>('claude');
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<{ id: string | null; draft: ScheduleInput } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,12 +39,13 @@ export function Schedules() {
 
   useEffect(() => {
     load();
+    api.engine().then((r) => setEngine(r.engine)).catch(() => {});
     // Poll so nextRunAt / lastStatus reflect the tick as it fires.
     const t = setInterval(load, 10_000);
     return () => clearInterval(t);
   }, []);
 
-  const openCreate = () => setEditing({ id: null, draft: { ...BLANK } });
+  const openCreate = () => setEditing({ id: null, draft: { ...BLANK, engine } });
   const openEdit = (s: Schedule) =>
     setEditing({ id: s.id, draft: { name: s.name, prompt: s.prompt, engine: s.engine, cwd: s.cwd, pattern: s.pattern, oneShot: s.oneShot } });
 
@@ -187,11 +191,8 @@ function ScheduleForm({ draft, onChange }: { draft: ScheduleInput; onChange: (pa
       </div>
       <div className="settings-field">
         <label htmlFor="s-engine">Engine</label>
-        <select id="s-engine" className="settings-input" value={draft.engine} onChange={(e) => onChange({ engine: e.target.value as SessionKind })}>
-          <option value="claude">Claude</option>
-          <option value="codex">Codex</option>
-          <option value="kimi">Kimi</option>
-        </select>
+        <input id="s-engine" className="settings-input" value={draft.engine} readOnly disabled />
+        <p className="settings-hint">Fixed to this launcher's engine — it only runs its own engine's sessions.</p>
       </div>
       <div className="settings-field">
         <label>Schedule type</label>

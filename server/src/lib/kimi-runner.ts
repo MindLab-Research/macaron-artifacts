@@ -26,7 +26,6 @@ import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
 import path from 'node:path';
-import { ClientSideConnection, PROTOCOL_VERSION, ndJsonStream } from '@agentclientprotocol/sdk';
 import type { Client, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, WriteTextFileRequest, ContentBlock, McpServerStdio } from '@agentclientprotocol/sdk';
 import { getActiveKimiProviderEnv } from './kimi-config.js';
 import { findKimiSessionDir } from './kimi-store.js';
@@ -39,16 +38,27 @@ function detectKimiBinary(): string | undefined {
   if (process.env.MACARON_KIMI_PATH && existsSync(process.env.MACARON_KIMI_PATH)) {
     return process.env.MACARON_KIMI_PATH;
   }
-  for (const p of ['/opt/homebrew/bin/kimi', '/usr/local/bin/kimi', '/usr/bin/kimi']) {
+  const bunGlobal = process.env.HOME ? [path.join(process.env.HOME, '.bun/bin/kimi')] : [];
+  for (const p of ['/opt/homebrew/bin/kimi', '/usr/local/bin/kimi', '/usr/bin/kimi', ...bunGlobal]) {
     if (existsSync(p)) return p;
   }
   try {
     const which = execSync('which kimi', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    if (which) return which;
+    // `which` happily prints a dangling symlink (e.g. a pruned bun global
+    // install) — verify the target actually exists before trusting it.
+    if (which && existsSync(which)) return which;
   } catch { /* not on PATH */ }
   return undefined;
 }
-export const KIMI_BINARY = detectKimiBinary();
+
+// Cache only on success: a server booted before the CLI was installed (or
+// before its dir landed on PATH) must recover on the next run instead of
+// serving "kimi CLI not found" until restart.
+let cachedKimiBinary: string | undefined;
+function kimiBinary(): string | undefined {
+  if (!cachedKimiBinary || !existsSync(cachedKimiBinary)) cachedKimiBinary = detectKimiBinary();
+  return cachedKimiBinary;
+}
 
 export type KimiRunOptions = {
   prompt: string;
@@ -138,7 +148,8 @@ export async function* runKimi(opts: KimiRunOptions): AsyncGenerator<RunnerEvent
   };
 
   void (async () => {
-    if (!KIMI_BINARY) {
+    const binary = kimiBinary();
+    if (!binary) {
       push({ kind: 'error', error: 'kimi CLI not found — install Kimi Code or set MACARON_KIMI_PATH' });
       push({ kind: 'done', exitCode: -1 });
       finish();
@@ -149,7 +160,7 @@ export async function* runKimi(opts: KimiRunOptions): AsyncGenerator<RunnerEvent
     console.log(
       `[kimi-runner] starting  model=${providerEnv.KIMI_MODEL_NAME || '(system)'}  base=${providerEnv.KIMI_MODEL_BASE_URL || '(ambient)'}  resume=${opts.resume ? opts.resume.slice(0, 8) : '(new)'}  cwd=${opts.cwd}`,
     );
-    const child = spawn(KIMI_BINARY, ['acp'], {
+    const child = spawn(binary, ['acp'], {
       cwd: opts.cwd,
       env: { ...process.env, ...providerEnv },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -235,20 +246,25 @@ export async function* runKimi(opts: KimiRunOptions): AsyncGenerator<RunnerEvent
       },
     };
 
-    const stream = ndJsonStream(
-      Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    );
-    const conn = new ClientSideConnection(() => clientImpl, stream);
-
     let capturedSid = '';
-    const onAbort = () => {
-      if (capturedSid) void conn.cancel({ sessionId: capturedSid }).catch(() => {});
-      child.kill('SIGTERM');
-      setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, 3000).unref();
-    };
-
     try {
+      // Lazy-import the ACP SDK so only the kimi (mkx) launcher pulls it in — the
+      // claude/codex launchers boot the shared bundle without it installed. Kept
+      // inside the try so a missing SDK surfaces as a stream `error` (like the
+      // claude/codex runners), not an unhandled rejection.
+      const { ClientSideConnection, PROTOCOL_VERSION, ndJsonStream } = await import('@agentclientprotocol/sdk');
+      const stream = ndJsonStream(
+        Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
+        Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      );
+      const conn = new ClientSideConnection(() => clientImpl, stream);
+
+      const onAbort = () => {
+        if (capturedSid) void conn.cancel({ sessionId: capturedSid }).catch(() => {});
+        child.kill('SIGTERM');
+        setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, 3000).unref();
+      };
+
       await conn.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },

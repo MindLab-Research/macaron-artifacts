@@ -11,7 +11,9 @@
     "start": "node server/dist/index.js",
     "bundle": "pnpm --filter @macaron/server bundle",
     "prepack": "pnpm --filter @macaron/shared build && pnpm --filter @macaron/server bundle && pnpm --filter @macaron/web build",
-    "typecheck": "pnpm --filter @macaron/shared typecheck && pnpm --filter @macaron/server typecheck && pnpm --filter @macaron/web typecheck"
+    "typecheck": "pnpm --filter @macaron/shared typecheck && pnpm --filter @macaron/server typecheck && pnpm --filter @macaron/web typecheck",
+    "replay:test": "node --test scripts/replay/*.test.mjs",
+    "replay:render": "pnpm build:web && node scripts/replay/render.mjs"
   },
   "bin": {
     "mcc": "./bin/mcc.mjs"
@@ -31,7 +33,6 @@
     "@fastify/static": "^8.0.0",
     "@genui/diagnostics": "https://pkg.pr.new/MindLab-Research/macaron-genui-demo/@genui/diagnostics@7c845c8",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@openai/codex-sdk": "^0.142.5",
     "@unocss/autocomplete": "^66.7.5",
     "@unocss/core": "^66.7.5",
     "@unocss/preset-wind3": "^66.7.5",
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
-    "pkg-pr-new": "^0.0.75"
+    "pkg-pr-new": "^0.0.75",
+    "playwright-core": "^1.61.1"
   }
 }

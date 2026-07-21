@@ -4,6 +4,13 @@ import path from 'node:path';
 export const PORT = parseInt(process.env.MACARON_PORT || '7878', 10);
 export const HOST = process.env.MACARON_HOST || '127.0.0.1';
 
+// The engine this launcher was booted as (mcc→claude, mcx→codex, mkx→kimi).
+// Unset means claude. Used to gate engine-specific routes/schedules so a
+// launcher never accepts or runs a foreign-engine session — which, post
+// dependency-split, would try to load an SDK it never installed.
+export const ENGINE: 'claude' | 'codex' | 'kimi' =
+  process.env.MACARON_ENGINE === 'kimi' ? 'kimi' : process.env.MACARON_ENGINE === 'codex' ? 'codex' : 'claude';
+
 // Optional shared token that gates the API when the server is reachable from
 // the network. Empty = auth off (the default for loopback-only binds).
 export const AUTH_TOKEN = process.env.MACARON_AUTH_TOKEN || '';

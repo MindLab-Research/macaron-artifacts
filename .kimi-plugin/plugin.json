@@ -3,7 +3,7 @@
   "version": "0.6.0",
   "description": "Macaron WebUI for Kimi Code — visual session manager, GenUI builder, and multi-provider streaming chat over your ~/.kimi-code/sessions/. Also available for Claude Code and Codex.",
   "author": {
-    "name": "Mindverse",
+    "name": "MindLab",
     "url": "https://macaron.im"
   },
   "homepage": "https://macaron.im",
@@ -16,7 +16,7 @@
     "displayName": "Macaron",
     "shortDescription": "Visual session manager + streaming GenUI for Kimi Code.",
     "longDescription": "Macaron opens a local WebUI that mirrors your Kimi Code sessions from ~/.kimi-code/sessions/ — browse workspaces, pin sessions to a canvas, continue any turn, and preview streaming GenUI TSX artifacts. Also bundles the genui-builder skill so Kimi Code can author renderable UI from a prompt.",
-    "developerName": "Mindverse",
+    "developerName": "MindLab",
     "websiteURL": "https://macaron.im"
   }
 }

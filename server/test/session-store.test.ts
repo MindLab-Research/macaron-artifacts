@@ -13,7 +13,7 @@ process.env.HOME = tmpHome;
 process.env.USERPROFILE = tmpHome;
 
 const { CLAUDE_PROJECTS } = await import('../src/config.js');
-const { readSessionMessages, resolveProjectCwd, searchProjectFiles } = await import('../src/lib/session-store.js');
+const { readSessionMessages, resolveProjectCwd, resolveSessionCwd, searchProjectFiles } = await import('../src/lib/session-store.js');
 
 const PROJECT = 'mcc-test';
 const projectDir = path.join(CLAUDE_PROJECTS, PROJECT);
@@ -68,6 +68,14 @@ test('tail-truncated sessions keep the flat context bar instead of estimating a 
   assert.equal(detail.contextBreakdown, undefined);
 });
 
+test('messages preserve jsonl source order for stable replay', async () => {
+  await writeSession('replay', [stringUserLine, assistantLine]);
+  const detail = await readSessionMessages(PROJECT, 'replay');
+  assert.deepEqual(detail.messages.map((message) => message.sourceLine), [1, 2]);
+  assert.deepEqual(detail.messages.map((message) => message.timestamp), ['2026-07-07T00:00:00Z', '2026-07-07T00:00:01Z']);
+  assert.equal(detail.replayMessages, detail.messages);
+});
+
 test('project cwd resolution prefers a live session and otherwise uses the trusted registry fallback', async () => {
   const cwdProject = 'cwd-resolution';
   const cwdProjectDir = path.join(CLAUDE_PROJECTS, cwdProject);
@@ -90,6 +98,12 @@ test('project cwd resolution prefers a live session and otherwise uses the trust
   assert.equal(await resolveProjectCwd(cwdProject, registryCwd), liveCwd);
   await fs.rm(liveCwd, { recursive: true, force: true });
   assert.equal(await resolveProjectCwd(cwdProject, registryCwd), registryCwd);
+});
+
+test('session cwd resolution falls back when the recorded worktree was removed', async () => {
+  const staleCwd = path.join(tmpHome, 'removed-session-worktree');
+  await writeSession('stale-cwd', [{ type: 'user', cwd: staleCwd, message: { role: 'user', content: 'stale' } }]);
+  assert.equal(await resolveSessionCwd(PROJECT, 'stale-cwd'), tmpHome);
 });
 
 test('mention search skips a stale session cwd and uses the live project root', async () => {

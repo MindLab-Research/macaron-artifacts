@@ -16,6 +16,8 @@ import type { CodexRuntimeOverride } from './api';
 import { sendCodexMessage, startCodexThread, subscribeCodexLive, type CodexStreamEvent } from './stream';
 import { CodexComposer, type ComposerImage } from './CodexComposer';
 import { notify } from '../lib/notify';
+import { useReplay } from '../components/ReplayControls';
+import { formatDuration } from '../lib/thinkingVerbs';
 
 // GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
 // import so the default codex bundle stays small. First render_ui in a
@@ -32,12 +34,12 @@ type Item =
   | { id: string; kind: 'user'; text: string; images?: ComposerImage[] }
   | { id: string; kind: 'assistant'; text: string }
   | { id: string; kind: 'reasoning'; text: string }
-  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; isError?: boolean }
+  | { id: string; kind: 'tool'; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }
   // GenUI render_ui tool call. Codex hands us the full `code` at
   // tool_use time (arguments are already aggregated by the CLI), so we
   // render immediately — no pending phase in practice. The tool_result
   // (checkGenUI diagnostics) may flip `status` to 'error' with details.
-  | { id: string; kind: 'genui'; toolUseId: string; code: string; status: 'ready' | 'error'; error?: string }
+  | { id: string; kind: 'genui'; toolUseId: string; code: string; status: 'ready' | 'error'; streaming?: boolean; error?: string }
   // Codex-native plan card (turn/plan/updated). One per thread, replaced in
   // place as new plan snapshots arrive.
   | { id: string; kind: 'plan'; steps: Array<{ step: string; status: CodexPlanStatus }>; explanation?: string | null }
@@ -67,9 +69,10 @@ function toolInputToCmd(name: string, input: unknown): string {
 
 function historyToItems(detail: SessionDetail): Item[] {
   const out: Item[] = [];
+  const toolStartedAt = new Map<string, number>();
   let seq = 0;
   const next = () => `h-${seq++}`;
-  const walk = (blocks: Block[], role: Message['role']) => {
+  const walk = (blocks: Block[], role: Message['role'], timestamp?: string) => {
     for (const b of blocks) {
       if (b.kind === 'text' && b.text.trim()) {
         if (role === 'user') out.push({ id: next(), kind: 'user', text: b.text });
@@ -78,16 +81,19 @@ function historyToItems(detail: SessionDetail): Item[] {
         out.push({ id: next(), kind: 'reasoning', text: b.text });
       } else if (b.kind === 'tool_use') {
         if (isRenderUiTool(b.name)) {
-          const code = String((b.input as { code?: unknown } | null)?.code || '');
+           const input = b.input as { code?: unknown; _replayStreaming?: boolean } | null;
+           const code = String(input?.code || '');
           out.push({
             id: `genui-${b.id}`,
             kind: 'genui',
             toolUseId: b.id,
-            code,
-            status: 'ready',
+             code,
+             status: 'ready',
+             streaming: input?._replayStreaming,
           });
         } else {
           out.push({ id: b.id, kind: 'tool', name: b.name, input: b.input });
+          if (timestamp) toolStartedAt.set(b.id, Date.parse(timestamp));
         }
       } else if (b.kind === 'tool_result') {
         const target = [...out].reverse().find(
@@ -95,7 +101,12 @@ function historyToItems(detail: SessionDetail): Item[] {
             (it.kind === 'tool' && it.result === undefined && (b.toolUseId ? it.id === b.toolUseId : true))
             || (it.kind === 'genui' && it.toolUseId === b.toolUseId),
         );
-        if (target?.kind === 'tool') target.result = b.text;
+        if (target?.kind === 'tool') {
+          target.result = b.text;
+          const startedAt = toolStartedAt.get(target.id);
+          const finishedAt = timestamp ? Date.parse(timestamp) : NaN;
+          if (startedAt !== undefined && Number.isFinite(startedAt) && Number.isFinite(finishedAt) && finishedAt >= startedAt) target.durationMs = finishedAt - startedAt;
+        }
         else if (target?.kind === 'genui') {
           const flagged = b.text.startsWith('Rendered inline, but the TSX has issues');
           if (flagged) { target.status = 'error'; target.error = b.text; }
@@ -103,7 +114,7 @@ function historyToItems(detail: SessionDetail): Item[] {
       }
     }
   };
-  for (const m of detail.messages) walk(m.blocks, m.role);
+  for (const m of detail.messages) walk(m.blocks, m.role, m.timestamp);
   return out;
 }
 
@@ -220,7 +231,7 @@ function ToolCard({ it }: { it: Extract<Item, { kind: 'tool' }> }) {
         <span className="cx-tool-glyph">{toolGlyph(it.name)}</span>
         <span className="cx-tool-name">{it.name}</span>
         <span className={'cx-tool-status' + (it.isError ? ' err' : '')}>
-          {running ? 'running…' : it.isError ? 'failed' : 'done'}
+          {running ? 'running…' : it.isError ? 'failed' : 'done'}{it.durationMs != null ? ` · ${formatDuration(it.durationMs)}` : ''}
         </span>
       </div>
       <div className="cx-tool-cmd">{cmd}</div>
@@ -247,7 +258,7 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
         {it.status === 'error' && <span className="cx-genui-status err">diagnostics failed</span>}
       </div>
       <Suspense fallback={<div className="cx-genui-loading">Loading GenUI runtime…</div>}>
-        <GenuiPreview code={it.code} done />
+        <GenuiPreview code={it.code} done={!it.streaming} />
       </Suspense>
       {it.status === 'error' && it.error && (
         <details className="cx-genui-details">
@@ -487,7 +498,8 @@ export function CodexChat(props: CodexChatProps = {}) {
     };
   }, [sid, isNew, refreshKey]);
 
-  const diskHistory = useMemo(() => (detail ? historyToItems(detail) : []), [detail]);
+  const replay = useReplay(detail?.replayMessages ?? detail?.messages ?? [], isNew || sending);
+  const diskHistory = useMemo(() => detail ? historyToItems({ ...detail, messages: replay.messages }) : [], [detail, replay.messages]);
   const history = useMemo(
     () => reconcileHistoryWithLive(diskHistory, live),
     [diskHistory, live],
@@ -619,6 +631,7 @@ export function CodexChat(props: CodexChatProps = {}) {
       {!hideBar && (
         <div className="cx-main-head">
           <div className="cx-main-head-title">{title}</div>
+          <div className="cx-main-head-replay">{replay.controls}</div>
           {!isNew && (
             <>
               <span className="cx-main-head-dot">·</span>

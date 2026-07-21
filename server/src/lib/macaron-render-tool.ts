@@ -58,8 +58,24 @@ export const RENDER_UI_INSTRUCTIONS =
   'with no structure at all, a yes/no confirmation, error/failure traces, and code you were ' +
   'asked to write to a FILE (WHEN A PREVIEW WAS ALREADY APPROVED). When in doubt, render.';
 
+// Model routinely writes React.forwardRef / React.CSSProperties / React.useX
+// without adding `import React from 'react'`. TS then flags 'React refers to a
+// UMD global' AND the runtime throws ReferenceError, breaking the render.
+// The client applies the same rewrite before feeding the code to the renderer;
+// doing it here too keeps the tool_result diagnostics clean so the model isn't
+// nagged about a mistake we already corrected.
+function ensureReactImport(src: string): string {
+  if (!/\bReact\.\w/.test(src)) return src;
+  if (/^\s*import\s+React\b/m.test(src)) return src;
+  const named = src.match(/^(\s*)import\s*\{([^}]*)\}\s*from\s*(['"]react['"])/m);
+  if (named && !/^\s*import\s+React\s*,/m.test(src)) {
+    return src.replace(named[0], `${named[1]}import React, {${named[2]}} from ${named[3]}`);
+  }
+  return `import React from 'react';\n${src}`;
+}
+
 export async function handleRenderUI(code: string): Promise<RenderUIResult> {
-  const result = await checkGenUI(code);
+  const result = await checkGenUI(ensureReactImport(code));
   const text = result.ok
     ? 'Rendered inline. The user sees the UI now.'
     : `Rendered inline, but the TSX has issues:\n${result.diagnostics}`;
@@ -107,7 +123,7 @@ If a Markdown table, numbered list of ≥3 things, or "reply with your choice" w
 - Import all UI primitives from \`$macaron/ui\` in ONE combined import: \`import { Stack, Row, Card, Button, Badge, Text, Tabs, TabsList, TabsTrigger, TabsContent, NumberFlow, motion, AnimatePresence /* etc */ } from '$macaron/ui';\`
 - For charts: \`import { ChartContainer, ChartTooltip, ChartTooltipContent, AreaChart, Area, BarChart, Bar, LineChart, Line, CartesianGrid, XAxis, YAxis, PieChart, Pie } from '$macaron/ui/charts';\` (never import 'recharts' directly)
 - Icons: \`import { Plus, Minus, ChevronDown, CheckCircle2, /* … */ } from 'lucide-react';\`
-- React: \`import { useState, useEffect, useRef } from 'react';\`
+- React: \`import { useState, useEffect, useRef } from 'react';\` — prefer NAMED imports (\`useState\`, \`useMemo\`, \`forwardRef\`, \`type CSSProperties\`, \`type MutableRefObject\`, …). If you touch the React namespace directly (\`React.forwardRef\`, \`React.CSSProperties\`, \`React.FC\`, \`React.useCallback\`, etc.), you MUST ALSO put \`import React from 'react';\` at the top — TS will otherwise flag \`'React' refers to a UMD global, but the current file is a module\` and the render fails. Two safe styles: (a) named-only, no \`React.\` anywhere; (b) both — \`import React, { useState, ... } from 'react';\`. Never bare \`React.foo\` without the default import.
 - No relative imports, no other bare packages, no markdown fences, no JSON wrapping.
 
 # Available $macaron/ui components (use these instead of raw div/span when possible)

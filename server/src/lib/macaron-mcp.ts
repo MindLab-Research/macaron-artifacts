@@ -7,7 +7,7 @@
 // We do NOT call any external "generator" model — the Claude in this session
 // writes the TSX directly using $macaron/ui, taught via the tool description below.
 
-import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import {
   handleRenderUI,
@@ -15,7 +15,16 @@ import {
   RENDER_UI_TOOL_DESCRIPTION,
 } from './macaron-render-tool.js';
 
-export const macaronMcpServer = createSdkMcpServer({
+// Built lazily via getMacaronMcpServer() so `@anthropic-ai/claude-agent-sdk` is
+// only imported when a Claude run actually starts. Keeping the createSdkMcpServer
+// call out of module top-level is what lets the codex (mcx) and kimi (mkx)
+// launchers boot the shared bundle without the Claude SDK installed.
+let cached: McpSdkServerConfigWithInstance | null = null;
+
+export async function getMacaronMcpServer(): Promise<McpSdkServerConfigWithInstance> {
+  if (cached) return cached;
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk');
+  cached = createSdkMcpServer({
   name: 'macaron',
   version: '0.2.0',
   instructions: RENDER_UI_INSTRUCTIONS,
@@ -63,4 +72,6 @@ export const macaronMcpServer = createSdkMcpServer({
       { alwaysLoad: true },
     ),
   ],
-});
+  });
+  return cached;
+}

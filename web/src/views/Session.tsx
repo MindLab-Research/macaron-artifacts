@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
+import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre, loadShikiStreamCodeBlock } from '../components/MarkdownCode';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, GitBranch, GitFork, Info, Lock, MessageCircle, MoreHorizontal, Paperclip, Plus, RefreshCw, Square, Undo2, X } from 'lucide-react';
+import { useReplay } from '../components/ReplayControls';
 import { sessionToMarkdown } from '@macaron/shared';
 import {
   api,
@@ -45,6 +46,7 @@ import { useConfirm } from '../components/Confirm';
 import { useFileMention } from '../components/MentionPopup';
 import { StatusBar, type PermissionMode } from '../components/StatusBar';
 import { DiffCard, isDiffTool, extractDiff } from '../components/DiffCard';
+import { toolHeader, bashCommand, isToolExpandable } from '../lib/toolHeader';
 import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
@@ -192,7 +194,7 @@ export function flatten(messages: Message[]): Item[] {
         } else if (isRenderUITool(b.name)) {
           // Claude writes the TSX directly into the tool_use input.code field;
           // jsonl persists it. We use that as the rendered code immediately.
-          const input = (b.input || {}) as { code?: string; prompt?: string };
+          const input = (b.input || {}) as { code?: string; prompt?: string; _replayStreaming?: boolean };
           const code = typeof input.code === 'string' ? input.code : '';
           const prompt = code
             ? `${code.split('\n')[0] || ''} … (${code.length} chars)`
@@ -208,7 +210,7 @@ export function flatten(messages: Message[]): Item[] {
             toolUseId,
             prompt,
             code: code || undefined,
-            status: code ? 'ready' : 'pending',
+            status: code && !input._replayStreaming ? 'ready' : 'pending',
           };
           out.push(it);
           const pending = { item: it as PairedTool, ts: m.timestamp };
@@ -281,26 +283,6 @@ export function flatten(messages: Message[]): Item[] {
     }
   }
   return out;
-}
-
-// ---- Tool header formatting (Bash → command first line, etc.) -------------
-
-export function toolHeader(name: string, input: any): string {
-  if (!input || typeof input !== 'object') return '';
-  if (name === 'Bash') {
-    return String(input.command || '').replace(/\s+/g, ' ').slice(0, 240);
-  }
-  if (name === 'Read' || name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
-    const p = String(input.file_path || '');
-    return p ? '…' + p.split('/').slice(-2).join('/') : '';
-  }
-  if (name === 'Glob') return String(input.pattern || '');
-  if (name === 'Grep') return String(input.pattern || '');
-  if (name === 'TaskCreate') return String(input.subject || '');
-  if (name === 'TaskUpdate') return `#${input.taskId || ''} → ${input.status || input.subject || ''}`;
-  if (name === 'WebFetch' || name === 'WebSearch') return String(input.url || input.query || '');
-  const s = JSON.stringify(input);
-  return s.length > 200 ? s.slice(0, 200) + '…' : s;
 }
 
 // ---- Items ----------------------------------------------------------------
@@ -586,13 +568,51 @@ function SubagentItem({
 
 const PREVIEW_LINES = 2;
 
+// Bash input scripts render through the same Shiki block the chat markdown uses, so the
+// heavy highlighter stays in its lazy chunk and out of the Session view's default bundle.
+const BashScript = lazy(loadShikiStreamCodeBlock);
+
 function ToolItem({ id, name, input, result, durationMs, isError }: { id?: string; name: string; input: unknown; result?: string; durationMs?: number; isError?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [inputOverflows, setInputOverflows] = useState(false);
+  const inputRef = useRef<HTMLDivElement>(null);
   const header = toolHeader(name, input);
+  const command = bashCommand(name, input);
+  const commandLines = command ? command.split('\n') : [];
   const resultText = (result ?? '').replace(/\n+$/, '');
   const allLines = resultText ? resultText.split('\n') : [];
   const previewLines = open ? allLines : allLines.slice(0, PREVIEW_LINES);
-  const extra = Math.max(0, allLines.length - PREVIEW_LINES);
+  const extra = Math.max(0, allLines.length - PREVIEW_LINES) + Math.max(0, commandLines.length - PREVIEW_LINES);
+  // Both the input script and the output collapse to PREVIEW_LINES; expandable only when
+  // one of them actually overflows — no toggle for a script/output that already fits.
+  const expandable = open || inputOverflows || isToolExpandable(commandLines.length, allLines.length, PREVIEW_LINES);
+  const expandLabel = extra > 0 ? `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)` : 'expand';
+
+  // Logical line counts miss long wrapped commands. Measure the actual collapsed Shiki
+  // viewport so the toggle appears whenever more than two visual lines are clipped. The
+  // mutation observer catches the lazy highlighter replacing the plaintext fallback.
+  useEffect(() => {
+    if (!command || open || !inputRef.current) return;
+    const root = inputRef.current;
+    let frame = 0;
+    const measure = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const viewport = root.querySelector<HTMLElement>('.chat-shiki-code__viewport');
+        setInputOverflows(Boolean(viewport && viewport.scrollHeight > viewport.clientHeight + 1));
+      });
+    };
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    const mutationObserver = new MutationObserver(measure);
+    resizeObserver.observe(root);
+    mutationObserver.observe(root, { childList: true, subtree: true, characterData: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [command, open]);
 
   return (
     <div className="ti-tool" data-item-id={id}>
@@ -601,22 +621,41 @@ function ToolItem({ id, name, input, result, durationMs, isError }: { id?: strin
         <span className="ti-tool-name">{name}</span>
         {header && (
           <span className="ti-tool-args" title={header}>
-            ({header})
+            {name === 'Bash' ? header : `(${header})`}
           </span>
         )}
         {durationMs != null && <span className="ti-tool-dur">{formatDuration(durationMs)}</span>}
       </div>
+      {command && (
+        <div ref={inputRef} className={`ti-tool-out ti-tool-input${open ? ' is-expanded' : ' is-collapsed'}`}>
+          <span className="ti-rail">└</span>
+          <div className="ti-tool-body">
+            <Suspense fallback={(
+              <div className="chat-shiki-code">
+                <div className="chat-shiki-code__viewport">
+                  <pre className="chat-code-plain">{command}</pre>
+                </div>
+              </div>
+            )}>
+              <BashScript code={command} language="bash" streaming={false} />
+            </Suspense>
+          </div>
+        </div>
+      )}
       {result !== undefined && allLines.length > 0 && (
         <div className="ti-tool-out">
           <span className="ti-rail">└</span>
           <div className="ti-tool-body">
             {previewLines.length > 0 && <pre>{previewLines.join('\n')}</pre>}
-            {extra > 0 && (
-              <button className="ti-expand" onClick={() => setOpen((v) => !v)}>
-                {open ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : `… +${extra} ${extra === 1 ? 'line' : 'lines'} (expand)`}
-              </button>
-            )}
           </div>
+        </div>
+      )}
+      {expandable && (
+        <div className="ti-tool-out ti-tool-toggle-row">
+          <span className="ti-rail" aria-hidden="true">└</span>
+          <button className="ti-expand ti-tool-toggle" onClick={() => setOpen((v) => !v)}>
+            {open ? <><ArrowUp size={12} aria-hidden="true" /> collapse</> : expandLabel}
+          </button>
         </div>
       )}
     </div>
@@ -630,12 +669,14 @@ function ToolItem({ id, name, input, result, durationMs, isError }: { id?: strin
 function ThinkingIndicator({
   assistantLen,
   outputTokens,
+  activity,
 }: {
   assistantLen: number;
   // Authoritative cumulative output_tokens from the SDK's message_delta
   // usage stream. -1 = no signal yet (Macaron path or pre-first-delta); in
   // that case we fall back to the CLI's len/4 English estimate.
   outputTokens: number;
+  activity: readonly unknown[];
 }) {
   const startRef = useRef(Date.now());
   const verbRef = useRef<string>(THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)]!);
@@ -650,8 +691,6 @@ function ThinkingIndicator({
     outputTokens >= 0 ? outputTokens : Math.round(assistantLen / 4);
 
   useEffect(() => {
-    startRef.current = Date.now();
-    setNow(Date.now());
     setDisplayTokens(0);
     const clockId = window.setInterval(() => setNow(Date.now()), 500);
     const frameId = window.setInterval(
@@ -667,6 +706,18 @@ function ThinkingIndicator({
       window.clearInterval(easeId);
     };
   }, []);
+
+  // Reset the elapsed clock only when a new *structural* block appears
+  // (tool_use / tool_result / new text block) — not on every text delta,
+  // which streams as an appended tail of the SAME block and produced a
+  // constant `activity` reference change that reset the timer several
+  // times per second (visible as seconds counting up then flipping back
+  // to 0-2s again and again). Length changes are the cheap proxy for
+  // "the turn just entered a new phase, restart the phase clock".
+  useEffect(() => {
+    startRef.current = Date.now();
+    setNow(Date.now());
+  }, [activity.length]);
 
   const elapsedMs = Math.max(0, now - startRef.current);
   const tokens = displayTokens;
@@ -695,8 +746,24 @@ function ThinkingIndicator({
   );
 }
 
+// Prepend `import React from 'react'` when the model writes `React.foo`
+// (React.forwardRef, React.CSSProperties, React.useCallback, …) without
+// the default import. TS check flags 'refers to a UMD global' AND the
+// browser runtime throws ReferenceError on the bare identifier — both
+// break the render. Named-imports-only is the prompt-side guidance, this
+// is the belt for when the model ignores it.
+function ensureReactImport(src: string): string {
+  if (!/\bReact\.\w/.test(src)) return src;
+  if (/^\s*import\s+React\b/m.test(src)) return src;
+  const named = src.match(/^(\s*)import\s*\{([^}]*)\}\s*from\s*(['"]react['"])/m);
+  if (named && !/^\s*import\s+React\s*,/m.test(src)) {
+    return src.replace(named[0], `${named[1]}import React, {${named[2]}} from ${named[3]}`);
+  }
+  return `import React from 'react';\n${src}`;
+}
+
 function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
-  const code = it.code || '';
+  const code = it.code ? ensureReactImport(it.code) : '';
   const streaming = it.status === 'pending' && Boolean(code);
 
   // Remember the most recent code that actually rendered so a subsequent
@@ -705,10 +772,12 @@ function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   // and just tack an error banner on top.
   const [lastGoodCode, setLastGoodCode] = useState('');
   const [runtimeError, setRuntimeError] = useState('');
+  const [hasRendered, setHasRendered] = useState(false);
 
   const onRendered = useCallback((rendered: string) => {
     setLastGoodCode(rendered);
     setRuntimeError('');
+    setHasRendered(true);
   }, []);
   const onError = useCallback((err: Error) => {
     setRuntimeError(err.message || String(err));
@@ -717,6 +786,7 @@ function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   const displayCode = code || lastGoodCode;
   const toolError = it.status === 'error' ? (it.error || 'unknown error') : '';
   const banner = toolError || runtimeError;
+  const waitingForFirstFrame = !hasRendered && !banner;
 
   if (!displayCode) {
     if (toolError) {
@@ -739,16 +809,23 @@ function GenuiItem({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
           Newer render failed — showing last good frame. {banner}
         </div>
       )}
-      <StaticGenUIRenderer
-        code={displayCode}
-        active
-        streaming={streaming}
-        preserveStateOnUpdate={streaming}
-        flushMode="immediate"
-        onRendered={onRendered}
-        onError={onError}
-        className="ti-genui-renderer macaron-genui-scope"
-      />
+      {waitingForFirstFrame && <div className="ti-genui-pending">generating UI…</div>}
+      <div
+        data-genui-render-state={hasRendered ? 'ready' : 'pending'}
+        aria-hidden={!hasRendered}
+        style={!hasRendered ? { height: 0, overflow: 'hidden', visibility: 'hidden' } : undefined}
+      >
+        <StaticGenUIRenderer
+          code={displayCode}
+          active
+          streaming={streaming}
+          preserveStateOnUpdate={streaming}
+          flushMode="immediate"
+          onRendered={onRendered}
+          onError={onError}
+          className="ti-genui-renderer macaron-genui-scope"
+        />
+      </div>
     </div>
   );
 }
@@ -1928,7 +2005,8 @@ export function Session(props: SessionProps = {}) {
     };
   }, [commitSnapshot, fetchSnapshot, isPending, liveSubscriptionGen, sid, onPendingConsumed]);
 
-  const rawItems = useMemo(() => (data ? flatten(data.messages) : []), [data]);
+  const replay = useReplay(data?.replayMessages ?? data?.messages ?? [], isNew || sending || polling || handoffPending);
+  const rawItems = useMemo(() => flatten(replay.messages), [replay.messages]);
   // Collapse consecutive read-only tool operations (Read / Grep / Glob /
   // cat / grep / ls / …) into a single summary badge, mirroring Claude
   // Code CLI's `⏺ Searching for N patterns, reading M files, listing K
@@ -2610,6 +2688,7 @@ export function Session(props: SessionProps = {}) {
             {data?.gitBranch && <span className="sess-branch">{data.gitBranch}</span>}
           </div>
           <div className="session-bar-right">
+            {replay.controls}
             {!isNew && (
               <button
                 className="ghost small"
@@ -2634,6 +2713,7 @@ export function Session(props: SessionProps = {}) {
           </div>
         </div>
       )}
+      {hideBar && replay.controls && <div className="session-replay-bar">{replay.controls}</div>}
 
       {/*
         flex-direction: column-reverse on .thread. DOM order must be newest →
@@ -2641,7 +2721,7 @@ export function Session(props: SessionProps = {}) {
         button, banners, error/empty placeholders) goes at the END of the DOM.
       */}
       <div className="thread tui" ref={threadRef}>
-        {(sending || polling) && <ThinkingIndicator assistantLen={liveAssistantLen} outputTokens={outputTokens} />}
+        {(sending || polling) && <ThinkingIndicator assistantLen={liveAssistantLen} outputTokens={outputTokens} activity={liveTurn} />}
         {/* Suggested follow-ups from the throwaway cache-hit query. Rendered
             ABOVE liveTurn in DOM (so BELOW it visually — column-reverse)
             i.e. just above the input area, right under the latest reply.

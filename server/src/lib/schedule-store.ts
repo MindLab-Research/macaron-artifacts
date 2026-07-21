@@ -47,6 +47,13 @@ export async function warmSchedulesCache(): Promise<void> {
   await readSchedules();
 }
 
+// Test-only: drop the in-memory cache so the next read reloads from disk. Lets a
+// test seed the JSON file directly (simulating a foreign/pre-split schedule) and
+// have the store pick it up.
+export function __resetCacheForTests(): void {
+  cache = null;
+}
+
 // Sync getter for the tick loop — cache is warmed at startup.
 export function listSchedules(): Schedule[] {
   return cache ?? [];

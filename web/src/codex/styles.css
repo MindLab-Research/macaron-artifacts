@@ -349,6 +349,16 @@ body {
   font-size: 12px;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
+.cx-main-head-replay { margin-left: auto; }
+.cx-main-head-replay .replay-controls { display: flex; align-items: center; gap: 5px; }
+.cx-main-head-replay .replay-button { width: 28px; height: 28px; padding: 0; border: 1px solid var(--cx-border); border-radius: 7px; background: transparent; color: var(--cx-muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.cx-main-head-replay .replay-button:hover { background: var(--cx-hover); color: var(--cx-text); }
+.cx-main-head-replay .replay-settings-menu { border-color: var(--cx-border); background: var(--cx-panel); box-shadow: var(--cx-shadow); }
+.cx-main-head-replay .replay-settings-menu label { color: var(--cx-text); }
+.cx-main-head-replay .replay-settings-menu select { border-color: var(--cx-border); background: var(--cx-panel); color: var(--cx-text); }
+.cx-main-head-replay .replay-settings-menu span { color: var(--cx-muted); }
+.cx-main-head-replay input[type='range'] { width: clamp(72px, 12vw, 150px); accent-color: var(--cx-accent, #C96442); }
+.cx-main-head-replay .replay-count { color: var(--cx-muted); font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; white-space: nowrap; }
 .cx-main-scroll {
   flex: 1;
   overflow-y: auto;

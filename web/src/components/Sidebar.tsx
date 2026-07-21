@@ -188,7 +188,33 @@ export function Sidebar({ onNavigate }: {
           icon: <X size={14} aria-hidden="true" />,
           label: 'Delete Workspace',
           danger: true,
-          onClick: () => toast('delete not yet implemented'),
+          onClick: async () => {
+            const ok = await confirm({
+              title: 'Delete workspace?',
+              body: (
+                <>
+                  All <strong>{w.sessionCount}</strong> session{w.sessionCount === 1 ? '' : 's'} under <code>{w.name || w.project}</code> will be removed from Macaron
+                  (jsonl files under <code>~/.claude/projects/{w.project}/</code>).
+                  {' '}<strong>The project directory on disk stays put</strong>
+                  {w.cwd ? <> — <code>{w.cwd}</code> is not touched.</> : '.'}
+                  {' '}Can't be undone.
+                </>
+              ),
+              confirmLabel: `Delete ${w.sessionCount} session${w.sessionCount === 1 ? '' : 's'}`,
+              destructive: true,
+            });
+            if (!ok) return;
+            try {
+              const { removedSessions } = await api.deleteWorkspace(w.project);
+              toast(`Workspace deleted — removed ${removedSessions} session${removedSessions === 1 ? '' : 's'}`);
+              // If we were sitting on this workspace, bounce home so the
+              // dashboard doesn't keep polling a project that no longer exists.
+              if (activeProject === w.project) navigate('/');
+              loadData();
+            } catch (err) {
+              toast(`Delete failed: ${(err as Error).message}`);
+            }
+          },
         },
       ],
     });

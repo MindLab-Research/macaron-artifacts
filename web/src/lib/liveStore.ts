@@ -11,9 +11,6 @@ import type { Message } from '@macaron/shared';
 import { extractPartialCode } from './partialJson';
 import { authedFetch } from './auth';
 
-const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'str_replace', 'str_replace_editor', 'str_replace_based_edit_tool']);
-const isDiffTool = (name: string) => DIFF_TOOLS.has(name);
-
 // A single item on the timeline. Text chunks and tool calls are stored in
 // one ordered list so the UI renders them in the exact interleaved order
 // they arrive (Claude often emits `text → tool → text → tool → text`, and
@@ -253,7 +250,11 @@ function applyLiveEvent(sid: string, p: { type?: string; [k: string]: unknown })
           notify(sid);
         }
       } catch { /* tolerate */ }
-    } else if (s && isDiffTool(String(p.name))) {
+    } else if (s) {
+      // Any other regular tool (Bash, Read, diff tools…): the tool_use started
+      // with an empty input, so backfill the fully parsed args now that they're
+      // complete — otherwise e.g. a live Bash row would show neither description
+      // nor command until the on-disk snapshot takes over.
       try {
         const obj = JSON.parse(String(p.final_json || ''));
         const t = s.timeline.find((x) => x.kind === 'tool' && x.id === `live-${p.id}`);
@@ -543,7 +544,9 @@ export function startNewSession(project: string, opts: NewSessionOptions): Promi
                       notify(sid);
                     }
                   } catch { /* tolerate */ }
-                } else if (s && isDiffTool(p.name)) {
+                } else if (s) {
+                  // Any other regular tool (Bash, Read, diff tools…): backfill
+                  // the fully parsed args now that streaming is complete.
                   try {
                     const obj = JSON.parse(p.final_json);
                     const t = s.timeline.find((x) => x.kind === 'tool' && x.id === `live-${p.id}`);

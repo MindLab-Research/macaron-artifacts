@@ -11,6 +11,7 @@ node_modules/
 # failure by reading start.sh's error output.
 dist/
 build/
+/out/
 *.tsbuildinfo
 
 # Env / secrets

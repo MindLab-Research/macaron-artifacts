@@ -19,7 +19,7 @@ input: {
 The server picks which one is `/` at boot (see [Overview](/docs/architecture/overview)). In dev, Vite serves on `:5273` (`strictPort`) and proxies `/api` to the server on `:7878`.
 
 <Callout title="The @ alias points at vendored source">
-  `@` resolves to `web/src/macaron-vendor` — the vendored Macaron GenUI source (`source.tsx`, `components/ui/*`). When Mindverse publishes `@macaron/ui` on npm, the plan is to swap these imports and delete the vendor dir; the intent is flagged in `main.tsx` and the vendor `README.md`.
+  `@` resolves to `web/src/macaron-vendor` — the vendored Macaron GenUI source (`source.tsx`, `components/ui/*`). When `@macaron/ui` is published on npm, the plan is to swap these imports and delete the vendor dir; the intent is flagged in `main.tsx` and the vendor `README.md`.
 </Callout>
 
 ## Runtime Bootstrap

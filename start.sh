@@ -32,7 +32,7 @@ SRC_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DIR="$SRC_DIR"
 _needs_mirror=0
 case "$SRC_DIR" in
-  *"/.codex/plugins/cache/"*|*"/.claude/plugins/cache/"*|*"/.kimi-code/plugins/"*) _needs_mirror=1 ;;
+  *"/plugins/cache/"*|*"/.kimi-code/plugins/"*) _needs_mirror=1 ;;
 esac
 if [ "$_needs_mirror" = 1 ]; then
   # Version key: pull from package.json so parallel major bumps get

@@ -69,3 +69,10 @@ export async function lookupProjectCwd(project: string): Promise<string | undefi
   await loadRegistry();
   return cwdByProject.get(project);
 }
+
+export async function unregisterProjectCwd(project: string): Promise<boolean> {
+  await loadRegistry();
+  if (!cwdByProject.delete(project)) return false;
+  await persistRegistry();
+  return true;
+}

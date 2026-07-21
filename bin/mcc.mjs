@@ -6,6 +6,8 @@
 // Keep it types-only: --packages=external would externalize any runtime code it
 // gains into a bare import the published tarball can't resolve.
 import { readFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 
@@ -17,6 +19,7 @@ function printHelp() {
 Options:
   --host <host>          Bind address (default: 127.0.0.1)
   --port <port>          Port (default: 7878)
+  --model <model>        Default model for new sessions (sets ANTHROPIC_MODEL)
   --allow-origin <url>   Allow a hosted WebUI on this origin to drive the server
                          cross-origin (repeatable; appends to MACARON_ALLOWED_ORIGINS)
   --allow-hosted         Allow the official hosted WebUI (https://artifacts.macaron.im)
@@ -41,27 +44,31 @@ async function printVersion() {
   console.log(pkg.version);
 }
 
-const readValue = (i, flag) => {
-  const v = args[i + 1];
+const readValue = (argv, i, flag) => {
+  const v = argv[i + 1];
   if (v === undefined || v.startsWith('-')) throw new Error(`${flag} requires a value`);
   return v;
 };
 
-try {
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
+// Parse argv into process.env mutations (MACARON_* / ANTHROPIC_MODEL). Exported
+// so a launcher-to-boot integration test can drive the real parse in-process,
+// then warm the settings store against the resulting env. Throws on bad input;
+// --help/--version short-circuit via the onExit callback (process.exit in CLI).
+export async function parseArgs(argv, onExit = (code) => process.exit(code)) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     const eq = a.indexOf('=');
     const flag = eq === -1 ? a : a.slice(0, eq);
     const inline = eq === -1 ? null : a.slice(eq + 1);
-    if (flag === '--help' || flag === '-h') { printHelp(); process.exit(0); }
-    if (flag === '--version' || flag === '-v') { await printVersion(); process.exit(0); }
+    if (flag === '--help' || flag === '-h') { printHelp(); return onExit(0); }
+    if (flag === '--version' || flag === '-v') { await printVersion(); return onExit(0); }
     if (flag === '--allow-hosted') {
       if (inline !== null) throw new Error(`${flag} does not take a value`);
       process.env.MACARON_ALLOW_HOSTED = '1';
       continue;
     }
     if (flag === '--allow-origin') {
-      const origin = (inline ?? readValue(i, flag)).trim();
+      const origin = (inline ?? readValue(argv, i, flag)).trim();
       if (!origin) throw new Error(`${flag} requires a non-empty value`);
       const cur = process.env.MACARON_ALLOWED_ORIGINS;
       process.env.MACARON_ALLOWED_ORIGINS = cur ? `${cur},${origin}` : origin;
@@ -69,9 +76,16 @@ try {
       continue;
     }
     if (flag === '--host' || flag === '--port') {
-      process.env[flag === '--host' ? 'MACARON_HOST' : 'MACARON_PORT'] = inline ?? readValue(i, flag);
+      process.env[flag === '--host' ? 'MACARON_HOST' : 'MACARON_PORT'] = inline ?? readValue(argv, i, flag);
       // Advance past the consumed value only for the space form (inline === null).
       // `--flag=` (inline='') already has its value, so it must NOT skip the next arg.
+      if (inline === null) i++;
+      continue;
+    }
+    if (flag === '--model') {
+      const model = (inline ?? readValue(argv, i, flag)).trim();
+      if (!model) throw new Error(`${flag} requires a non-empty value`);
+      process.env.ANTHROPIC_MODEL = model;
       if (inline === null) i++;
       continue;
     }
@@ -82,12 +96,32 @@ try {
   if (port !== undefined && (!/^\d+$/.test(port) || +port < 1 || +port > 65535)) {
     throw new Error(`Invalid port: ${port}`);
   }
-} catch (e) {
-  console.error(`mcc: ${e.message}`);
-  process.exit(1);
 }
-process.env.NODE_ENV ??= 'production';
 
-// Relative to this bin file → ../server/dist/index.js (ESM import() resolves
-// against import.meta.url, so it works regardless of the caller's cwd).
-await import('../server/dist/index.js');
+// Only parse + boot the server when run as the CLI, not when imported by a test.
+// Package managers expose the bin as a symlink (node_modules/.bin/mcc), so
+// process.argv[1] is the symlink path while import.meta.url is realpath-resolved
+// — resolve both through realpath before comparing, or the installed bin no-ops.
+function isMain() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
+  try {
+    await parseArgs(args);
+  } catch (e) {
+    console.error(`mcc: ${e.message}`);
+    process.exit(1);
+  }
+  process.env.NODE_ENV ??= 'production';
+
+  // Relative to this bin file → ../server/dist/index.js (ESM import() resolves
+  // against import.meta.url, so it works regardless of the caller's cwd).
+  await import('../server/dist/index.js');
+}

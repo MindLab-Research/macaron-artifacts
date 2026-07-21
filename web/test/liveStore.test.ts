@@ -282,3 +282,20 @@ test('a consumed ended ring does not hide a newer turn on the same session', asy
   assert.equal(fetches, 3);
   clearLive(sid);
 });
+
+test('a live Bash tool_use backfills its command via tool_input_done (realtime path)', async () => {
+  const sid = 'live-bash-input-session';
+  globalThis.fetch = async () => sseResponse([
+    { type: 'meta', cwd: '/repo', sessionId: sid },
+    // tool_use opens with empty input; the full args land only on tool_input_done.
+    { type: 'tool_use', id: 'bash-1', name: 'Bash', input: {} },
+    { type: 'tool_input_done', id: 'bash-1', name: 'Bash', final_json: JSON.stringify({ command: 'set -e\nls -la', description: 'List files' }) },
+    { type: 'done', exitCode: 0 },
+  ]);
+
+  assert.equal(await attachLive('project', sid), 'attached');
+  const tool = getLive(sid)?.timeline.find((x) => x.kind === 'tool' && x.id === 'live-bash-1');
+  assert.ok(tool && tool.kind === 'tool');
+  assert.deepEqual(tool.input, { command: 'set -e\nls -la', description: 'List files' });
+  clearLive(sid);
+});

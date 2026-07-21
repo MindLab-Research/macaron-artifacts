@@ -136,12 +136,39 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
           return reply.status(409).send({ error: `name collides with existing project "${sibling}" in Claude's project encoding` });
         }
       }
-      // `mkdir` without recursive throws EEXIST if the dir is already there —
-      // that's the guard against clobbering an existing project.
-      await fs.mkdir(dest);
+      // `mkdir` without recursive throws EEXIST if the dir is already there.
+      // For a git-clone request, EEXIST is a hard collision (git refuses to
+      // clone into non-empty). For a plain create, an already-there dir that
+      // is empty is a leftover from a prior "Delete Workspace" (the sidebar
+      // action drops sessions but not the disk dir) — just adopt it silently
+      // instead of forcing the user to `rm -rf` behind our back. A non-empty
+      // dir still errors, with a message that names the actual obstacle.
+      try {
+        await fs.mkdir(dest);
+      } catch (e) {
+        const err = e as NodeJS.ErrnoException;
+        if (err.code !== 'EEXIST') throw err;
+        if (gitUrl) throw err;                          // clone needs empty target
+        let entries: string[];
+        try { entries = await fs.readdir(dest); }
+        catch (readErr) {
+          return reply.status(409).send({
+            error: `directory ${dest} exists but is unreadable (${(readErr as NodeJS.ErrnoException).code || 'unknown'}) — remove it or pick a different name`,
+          });
+        }
+        // Ignore purely hidden metadata (a stray .DS_Store from Finder, a
+        // .git shell from a prior init) so a "looks empty" folder still
+        // adopts cleanly. Any other file / dir means real content.
+        const meaningful = entries.filter((n) => !['.DS_Store', '.git', '.gitignore', '.gitkeep'].includes(n));
+        if (meaningful.length > 0) {
+          return reply.status(409).send({
+            error: `directory ${dest} already exists on disk with ${meaningful.length} file${meaningful.length === 1 ? '' : 's'} inside — pick a different name, or remove it (\`rm -rf "${dest}"\`) to start fresh`,
+          });
+        }
+        // Fall through: empty (or metadata-only) dir → we'll just register it.
+      }
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
-      if (err.code === 'EEXIST') return reply.status(409).send({ error: `already exists: ${name}` });
       return reply.status(500).send({ error: `mkdir failed: ${err.code || err.message}` });
     }
 

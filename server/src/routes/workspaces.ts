@@ -13,7 +13,9 @@ import { liveStart, livePush, liveEnd } from '../lib/live-registry.js';
 import { runClaude, runFollowup, type AttachedImage } from '../lib/claude-runner.js';
 import { registerRun, endRun } from '../lib/active-runs.js';
 import { getActiveProviderEnv, getFollowupSuggestionsEnabled } from '../lib/settings-store.js';
-import { lookupProjectCwd } from '../lib/project-registry.js';
+import { lookupProjectCwd, unregisterProjectCwd } from '../lib/project-registry.js';
+import path from 'node:path';
+import { CLAUDE_PROJECTS } from '../config.js';
 import { pushPermissionRequest, pushSessionDone } from '../lib/push-notify.js';
 import { createWorktree, bindWorktree, cleanupPendingWorktree, type PendingWorktree } from '../lib/worktree-store.js';
 
@@ -107,6 +109,40 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
   app.get('/api/workspaces', async () => {
     const sessions = await listAllSessions();
     return { workspaces: groupWorkspaces(sessions) };
+  });
+
+  // Forget a workspace: drop every session jsonl under this project + drop
+  // the persisted cwd registry entry. The project directory on disk stays
+  // put — that's the user's actual code, we only forget Macaron's records
+  // of it. Sidebar will re-list it only if a new session is started there.
+  app.delete<{ Params: Params }>('/api/workspaces/:project', async ({ params }, reply) => {
+    const project = params.project;
+    // Path-hardening: reject any traversal via the URL param.
+    const base = path.resolve(CLAUDE_PROJECTS);
+    const projDir = path.resolve(base, project);
+    if (!(projDir + path.sep).startsWith(base + path.sep)) {
+      return reply.status(400).send({ error: 'invalid project name' });
+    }
+    let removedSessions = 0;
+    try {
+      const files = await fs.readdir(projDir);
+      for (const f of files) {
+        if (!f.endsWith('.jsonl')) continue;
+        try { await fs.unlink(path.join(projDir, f)); removedSessions++; }
+        catch (e) { app.log.warn({ f, err: (e as Error).message }, 'delete-workspace: unlink failed'); }
+      }
+      // Only rmdir the project dir if it's fully empty now. A user's own
+      // sidecar (backup files, editor stashes) shouldn't get nuked silently.
+      try { await fs.rmdir(projDir); } catch { /* has non-jsonl content — leave it */ }
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        return reply.status(500).send({ error: `readdir failed: ${err.code || err.message}` });
+      }
+      // ENOENT is fine — sessions were already gone; still un-register below.
+    }
+    const wasRegistered = await unregisterProjectCwd(project);
+    return { removedSessions, unregistered: wasRegistered };
   });
 
   app.get<{ Params: Params }>('/api/workspaces/:project', async ({ params }) => {

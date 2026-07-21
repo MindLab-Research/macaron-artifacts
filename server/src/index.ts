@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static';
 import { AUTH_TOKEN, ALLOWED_ORIGINS, HOST, PORT, WEB_DIST } from './config.js';
 import { makeAuthHook, redactTokenInUrl, resolveToken, setArmedToken } from './lib/auth.js';
 import { makeCorsHook } from './lib/cors.js';
-import { warmSettingsCache } from './lib/settings-store.js';
+import { warmSettingsCache, seedProviderFromEnv } from './lib/settings-store.js';
 import { warmWorktreeCache } from './lib/worktree-store.js';
 import { warmPermissionRulesCache } from './lib/permission-rules.js';
 import { warmShareCache } from './lib/share-store.js';
@@ -69,8 +69,13 @@ const app = Fastify({
   },
   // Disable strict trailing-slash for friendlier URLs.
   ignoreTrailingSlash: true,
-  // Allow large request bodies (genui prompts can grow).
-  bodyLimit: 2 * 1024 * 1024,
+  // Allow large request bodies. GenUI prompts + inlined image attachments
+  // (base64-encoded dataUrls) can easily blow past a few MB: a single
+  // full-screen retina screenshot ~ 3–5 MB after base64. 2 MB used to 413
+  // any reply that carried a modest screenshot. 32 MB gives comfortable
+  // headroom for multi-image messages without letting a runaway upload
+  // OOM the process.
+  bodyLimit: 32 * 1024 * 1024,
   // Worktree cwds can be long (deep repo paths encoded as path params), and
   // Fastify caps a single param at 100 chars by default — a worktree under
   // .../macaron-genui-demo/.claude/worktrees/<name> blows past it and 414s every
@@ -95,6 +100,25 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
+
+// The Claude Agent SDK (and its transitive undici) fires fetches whose failures
+// bubble up as UNHANDLED rejections when the remote closes the TLS socket
+// mid-request (`TypeError: terminated` / `UND_ERR_SOCKET: other side closed`).
+// Node's default is to crash the whole process on unhandled rejection, so one
+// flaky provider request killed the WebUI server and left every open session
+// silently stalled (SSE closed → client saw "done" with no output → confusing
+// "finished" notification with no visible response).
+//
+// Log-and-continue: the SDK's own iterator will re-surface the error to its
+// caller (claude-runner) which already emits an SSE `error`+`done` for that
+// specific session. Keeping the process alive lets other sessions keep working.
+process.on('unhandledRejection', (reason: unknown) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  app.log.error({ err, kind: 'unhandledRejection' }, '[macaron-server] unhandled promise rejection — staying alive');
+});
+process.on('uncaughtException', (err: Error) => {
+  app.log.error({ err, kind: 'uncaughtException' }, '[macaron-server] uncaught exception — staying alive');
+});
 
 // Gate the API/relay behind a shared token when the server is reachable from
 // the network. resolveToken auto-generates one when bound to a non-loopback
@@ -125,13 +149,22 @@ await app.register(async (instance) => {
   await registerConfigFileRoutes(instance);
   await registerRelayRoutes(instance);
   await registerTunnelRoutes(instance);
-  await registerWorkspaceRoutes(instance);
   await registerProjectRoutes(instance);
   await registerFsRoutes(instance);
-  await registerSessionRoutes(instance);
   await registerWorktreeRoutes(instance);
-  await registerCodexRoutes(instance);
-  await registerKimiRoutes(instance);
+  // Engine-specific route groups. Each launcher sets MACARON_ENGINE and mounts
+  // only its own engine's runner routes, so a boot never touches another
+  // engine's runner module (and, with the runners' SDKs lazy-imported, never
+  // its SDK). The default (unset) engine is claude.
+  const engine = process.env.MACARON_ENGINE;
+  if (engine === 'codex') {
+    await registerCodexRoutes(instance);
+  } else if (engine === 'kimi') {
+    await registerKimiRoutes(instance);
+  } else {
+    await registerWorkspaceRoutes(instance);
+    await registerSessionRoutes(instance);
+  }
   await registerGitRoutes(instance);
   await registerShareRoutes(instance);
   await registerSearchRoutes(instance);
@@ -178,6 +211,16 @@ if (existsSync(WEB_DIST)) {
 
 try {
   await warmSettingsCache();
+  // One-liner bootstrap: if MACARON_PROVIDER_* / ANTHROPIC_BASE_URL+AUTH_TOKEN
+  // are in env, upsert them as a saved provider (and auto-activate when the
+  // user is still on the built-in `system` default). Lets a relay's docs page
+  // ship a copy-paste snippet that opens Macaron Artifacts fully configured.
+  const seedResult = await seedProviderFromEnv();
+  if (seedResult.seeded) {
+    app.log.info(
+      `env-seeded provider ${seedResult.providerId}${seedResult.activated ? ' (activated)' : ' (kept your active choice)'}`,
+    );
+  }
   await warmWorktreeCache();
   await warmPermissionRulesCache();
   await warmCodexConfigCache();

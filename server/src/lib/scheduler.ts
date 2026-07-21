@@ -3,6 +3,7 @@
 // session — the same spawn "+ New Session" does, minus the client SSE reply.
 
 import { promises as fs } from 'node:fs';
+import { ENGINE } from '../config.js';
 import { runClaude } from './claude-runner.js';
 import { runCodex } from './codex-runner.js';
 import { runKimi } from './kimi-runner.js';
@@ -85,6 +86,11 @@ async function drain(schedule: Schedule, stream: AsyncGenerator<RunnerEvent>): P
 // Fire a schedule now. Shared by the tick and the run-now route. Never throws —
 // records lastStatus and advances nextRunAt via recordRun.
 export async function fireSchedule(schedule: Schedule, advance = true): Promise<FireResult> {
+  // A persisted foreign-engine schedule (created before the dependency split, or
+  // synced from another launcher) can't run here — its SDK isn't installed.
+  // Refuse without dispatching so we never import a missing runner. Don't advance
+  // nextRunAt: it isn't ours to schedule.
+  if (schedule.engine !== ENGINE) return { ok: false, sessionId: null, error: `schedule engine ${schedule.engine} not runnable on this ${ENGINE} launcher` };
   if (inFlight.has(schedule.id)) return { ok: false, sessionId: null, error: 'schedule already running' };
   inFlight.add(schedule.id);
   try {
@@ -138,10 +144,13 @@ export async function fireSchedule(schedule: Schedule, advance = true): Promise<
   }
 }
 
-function tick(): void {
+// Exported for tests: run one scan synchronously instead of waiting for the
+// interval. Firing itself is still fire-and-forget.
+export function tick(): void {
   const now = Date.now();
   for (const s of listSchedules()) {
     if (s.status !== 'active' || s.nextRunAt === null || s.nextRunAt > now) continue;
+    if (s.engine !== ENGINE) continue; // foreign schedule — not runnable here (see fireSchedule)
     if (inFlight.has(s.id)) continue;
     void fireSchedule(s); // fire-and-forget; never blocks the tick
   }

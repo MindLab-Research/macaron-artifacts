@@ -3,7 +3,7 @@
   "version": "0.6.0",
   "description": "Macaron WebUI for Codex — visual session manager, GenUI builder, and multi-provider streaming chat over your ~/.codex/sessions/.",
   "author": {
-    "name": "Mindverse",
+    "name": "MindLab",
     "url": "https://macaron.im"
   },
   "homepage": "https://macaron.im",
@@ -15,7 +15,7 @@
     "displayName": "Macaron",
     "shortDescription": "Visual session manager + streaming GenUI for Codex.",
     "longDescription": "Macaron opens a local WebUI that mirrors your Codex sessions from ~/.codex/sessions/ — browse workspaces, pin sessions to a canvas, continue any turn, and preview streaming GenUI TSX artifacts. Also bundles the genui-builder skill so Codex can author renderable UI from a prompt.",
-    "developerName": "Mindverse",
+    "developerName": "MindLab",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
     "websiteURL": "https://macaron.im",

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ScheduleInput, SessionKind } from '@macaron/shared';
+import type { ScheduleInput } from '@macaron/shared';
+import { ENGINE } from '../config.js';
 import {
   readSchedules,
   getSchedule,
@@ -21,14 +22,21 @@ async function assertRunnableCwd(cwd: string): Promise<void> {
   if (!st?.isDirectory()) throw new Error('cwd must be an existing directory');
 }
 
-function normalizeInput(b: Body): ScheduleInput | null {
+// Result of validating a create body: the normalized input, or a 400 reason.
+// `engine` is fixed to ENGINE — an omitted engine defaults to it, an explicit
+// foreign engine is rejected (its SDK isn't installed here, so it could never
+// run; silently coercing it would let a client request one engine and have its
+// prompt fire under another).
+type NormalizeResult = { input: ScheduleInput } | { error: string };
+
+function normalizeInput(b: Body): NormalizeResult {
   const name = String(b.name || '').trim();
   const prompt = String(b.prompt || '').trim();
   const cwd = String(b.cwd || '').trim();
   const pattern = String(b.pattern || '').trim();
-  const engine: SessionKind = b.engine === 'codex' || b.engine === 'kimi' ? b.engine : 'claude';
-  if (!name || !prompt || !cwd || !pattern) return null;
-  return { name, prompt, cwd, pattern, engine, oneShot: Boolean(b.oneShot) };
+  if (!name || !prompt || !cwd || !pattern) return { error: 'name, prompt, cwd and pattern are required' };
+  if (b.engine !== undefined && b.engine !== ENGINE) return { error: `engine must be ${ENGINE}` };
+  return { input: { name, prompt, cwd, pattern, engine: ENGINE, oneShot: Boolean(b.oneShot) } };
 }
 
 export async function registerScheduleRoutes(app: FastifyInstance): Promise<void> {
@@ -41,11 +49,11 @@ export async function registerScheduleRoutes(app: FastifyInstance): Promise<void
   });
 
   app.post<{ Body: Body }>('/api/schedules', async (req, reply) => {
-    const input = normalizeInput(req.body || {});
-    if (!input) return reply.status(400).send({ error: 'name, prompt, cwd and pattern are required' });
+    const norm = normalizeInput(req.body || {});
+    if ('error' in norm) return reply.status(400).send({ error: norm.error });
     try {
-      await assertRunnableCwd(input.cwd);
-      return await createSchedule(input);
+      await assertRunnableCwd(norm.input.cwd);
+      return await createSchedule(norm.input);
     } catch (e) {
       return reply.status(400).send({ error: (e as Error).message });
     }
@@ -70,7 +78,10 @@ export async function registerScheduleRoutes(app: FastifyInstance): Promise<void
       patch.pattern = b.pattern.trim();
       if (!patch.pattern) return reply.status(400).send({ error: 'pattern required' });
     }
-    if (b.engine === 'claude' || b.engine === 'codex' || b.engine === 'kimi') patch.engine = b.engine;
+    // Engine is fixed to this launcher's boot engine; a foreign engine can't be
+    // set (its SDK isn't installed). Accept an explicit same-engine value, reject
+    // any other.
+    if (b.engine !== undefined && b.engine !== ENGINE) return reply.status(400).send({ error: `engine must be ${ENGINE}` });
     if (typeof b.oneShot === 'boolean') patch.oneShot = b.oneShot;
     try {
       if (patch.cwd !== undefined) await assertRunnableCwd(patch.cwd);
@@ -105,6 +116,7 @@ export async function registerScheduleRoutes(app: FastifyInstance): Promise<void
   app.post<{ Params: IdParams }>('/api/schedules/:id/run-now', async ({ params }, reply) => {
     const s = getSchedule(params.id);
     if (!s) return reply.status(404).send({ error: 'schedule not found' });
+    if (s.engine !== ENGINE) return reply.status(400).send({ error: `schedule engine ${s.engine} not runnable on this ${ENGINE} launcher` });
     const result = await fireSchedule(s, false);
     if (!result.ok) return reply.status(result.error === 'schedule already running' ? 409 : 500).send({ error: result.error || 'schedule run failed' });
     return { ok: true, sessionId: result.sessionId };
