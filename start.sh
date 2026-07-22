@@ -21,6 +21,123 @@ set -euo pipefail
 
 SRC_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# --- Preflight: dependency check ----------------------------------------
+# Every subsequent step (mirror rsync, corepack pnpm, install, build, node
+# launch) assumes Node 22+ exists. Without this block a fresh install on a
+# machine with no Node blows up ~40 lines later inside `corepack` with a
+# cryptic "command not found", which we've watched real users hit.
+#
+# Strategy: detect early, print platform-specific install guidance, and offer
+# a one-keypress nvm bootstrap for the two paths (Node missing / Node too old)
+# that we can safely fix without sudo. Skip auto-install on Windows Git-Bash
+# — Node installers there need a real GUI or PowerShell, not our shell.
+
+_macaron_platform() {
+  case "$(uname -s)" in
+    Darwin) echo "macos" ;;
+    Linux)  echo "linux" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+    *)      echo "unknown" ;;
+  esac
+}
+
+_macaron_node_hint() {
+  case "$(_macaron_platform)" in
+    macos)   cat >&2 <<'EOF'
+[macaron] Install Node 22+ one of:
+[macaron]   • brew install node                             # Homebrew
+[macaron]   • curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+[macaron]     then: nvm install 22 && nvm use 22
+[macaron]   • Or the LTS installer from https://nodejs.org
+EOF
+      ;;
+    linux)   cat >&2 <<'EOF'
+[macaron] Install Node 22+ one of:
+[macaron]   • curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+[macaron]     then: nvm install 22 && nvm use 22
+[macaron]   • curl -fsSL https://fnm.vercel.app/install | bash && fnm install 22
+[macaron]   • Or your distro's package manager (apt / dnf / pacman)
+EOF
+      ;;
+    windows) cat >&2 <<'EOF'
+[macaron] Install Node 22+:
+[macaron]   • winget install OpenJS.NodeJS.LTS
+[macaron]   • Or the installer from https://nodejs.org
+EOF
+      ;;
+    *) echo "[macaron] Install Node 22+ from https://nodejs.org" >&2 ;;
+  esac
+}
+
+# Bootstrap nvm + Node 22 in-place. Only offered when: (a) platform supports
+# it, (b) stdin is a TTY so the [Y/n] prompt actually reaches a human,
+# (c) MACARON_AUTO_INSTALL_NODE!=0 (default = ask). If the user declines or
+# nvm install fails, fall through to the manual hint. Sets NVM_DIR on the
+# current shell so the subsequent `node --version` sees the new binary.
+_macaron_try_install_node_via_nvm() {
+  local reason="$1" # "missing" | "outdated"
+  local plat; plat="$(_macaron_platform)"
+  case "$plat" in macos|linux) ;; *) return 1 ;; esac
+  case "${MACARON_AUTO_INSTALL_NODE:-1}" in 0|false|no) return 1 ;; esac
+  if [ ! -t 0 ]; then
+    echo "[macaron] non-interactive shell — skipping auto-install prompt" >&2
+    return 1
+  fi
+  local prompt="[macaron] Node is $reason. Install Node 22 via nvm (self-contained under ~/.nvm, no sudo)? [Y/n] "
+  local reply
+  printf '%s' "$prompt" >&2
+  if ! read -r reply; then return 1; fi
+  case "${reply:-y}" in n|N|no|No) echo "[macaron] declined." >&2; return 1 ;; esac
+
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    echo "[macaron] installing nvm to $NVM_DIR…" >&2
+    if ! command -v curl >/dev/null 2>&1; then
+      echo "[macaron] curl is required to download nvm — install curl first, or install Node manually." >&2
+      return 1
+    fi
+    if ! curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash >&2; then
+      echo "[macaron] nvm install failed. Falling back to manual instructions." >&2
+      return 1
+    fi
+  fi
+  # shellcheck disable=SC1091
+  . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || { echo "[macaron] failed to source nvm.sh" >&2; return 1; }
+  echo "[macaron] installing Node 22 via nvm…" >&2
+  nvm install 22 >&2 || { echo "[macaron] nvm install 22 failed" >&2; return 1; }
+  nvm use 22 >&2 || { echo "[macaron] nvm use 22 failed" >&2; return 1; }
+  # Prepend the newly-installed Node's bin dir to PATH for the rest of this
+  # script (nvm modifies PATH only in the current shell; subshells inherit).
+  local node_bin; node_bin="$(nvm which 22 2>/dev/null | head -1)"
+  if [ -n "$node_bin" ]; then
+    export PATH="$(dirname "$node_bin"):$PATH"
+  fi
+  command -v node >/dev/null 2>&1
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "[macaron] Node not found." >&2
+  if ! _macaron_try_install_node_via_nvm "missing"; then
+    _macaron_node_hint
+    exit 1
+  fi
+fi
+
+_NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if [ "$_NODE_MAJOR" -lt 22 ]; then
+  echo "[macaron] Node $_NODE_MAJOR is too old — Macaron needs Node 22+." >&2
+  if ! _macaron_try_install_node_via_nvm "outdated"; then
+    _macaron_node_hint
+    exit 1
+  fi
+  # Re-check after nvm switch.
+  _NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  if [ "$_NODE_MAJOR" -lt 22 ]; then
+    echo "[macaron] still on Node $_NODE_MAJOR after nvm — open a new shell so PATH picks up the change, then retry." >&2
+    exit 1
+  fi
+fi
+
 # Codex plugin cache (~/.codex/plugins/cache/…) is NOT a stable working dir:
 # Codex prunes/regenerates it on version sync, killing our node_modules +
 # web/dist + server/dist and leaving a listening server pointing at

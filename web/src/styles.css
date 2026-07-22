@@ -1678,6 +1678,9 @@ textarea:focus, select:focus, input:focus {
 }
 .ti-genui-codebtn {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: none;
   background: transparent;
   color: var(--muted);
