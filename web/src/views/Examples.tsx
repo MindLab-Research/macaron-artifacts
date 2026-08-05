@@ -8,6 +8,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, BarChart3, Calendar, Compass, FolderTree, Moon, Palette, PenLine, Settings } from 'lucide-react';
 import { api } from '../lib/api';
+import { authedFetch } from '../lib/auth';
 import type { Workspace } from '@macaron/shared';
 import { setPendingPrompt } from '../lib/newSession';
 
@@ -154,10 +155,19 @@ export function Examples() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.workspaces().then((r) => {
-      setWorkspaces(r.workspaces);
-      if (r.workspaces.length > 0 && !target) setTarget(r.workspaces[0]!.project);
-    }).catch(() => {});
+    // Codex bundle mounts this same view; if we hit the Claude-scoped
+    // /api/sessions/claude/workspaces there, the list is always empty and
+    // every "Try" button is disabled. Detect the active engine and load
+    // from its own workspaces endpoint. `/w/<project>` navigation works
+    // for both bundles.
+    (async () => {
+      const { engine } = await api.engine().catch(() => ({ engine: 'claude' as const }));
+      const url = engine === 'codex' ? '/api/codex/workspaces' : engine === 'kimi' ? '/api/kimi/workspaces' : '/api/sessions/claude/workspaces';
+      const r = await authedFetch(url).then((r) => r.json()).catch(() => ({ workspaces: [] as Workspace[] }));
+      const ws = (r.workspaces as Workspace[] | undefined) ?? [];
+      setWorkspaces(ws);
+      if (ws.length > 0 && !target) setTarget(ws[0]!.project);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

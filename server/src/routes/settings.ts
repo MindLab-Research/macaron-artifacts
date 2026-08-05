@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
+import { probeProvider } from '../lib/provider-probe.js';
 import {
+  readSettings,
   readPublicSettings,
   addProvider,
   updateProvider,
@@ -13,6 +15,7 @@ import {
 type AddBody = { name?: string; endpoint?: string; model?: string; apiKey?: string };
 type UpdateBody = { name?: string; endpoint?: string; model?: string; apiKey?: string };
 type ActiveBody = { providerId?: string };
+type TestBody = { id?: string; endpoint?: string; model?: string; apiKey?: string };
 type PermissionModeBody = { mode?: DefaultPermissionMode };
 type FollowupsBody = { enabled?: boolean };
 
@@ -61,6 +64,23 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
       }
     },
   );
+
+  // Smoke test a provider draft before it's saved. `id` lets the form probe an
+  // existing row whose key the client never sees ("leave blank to keep").
+  app.post<{ Body: TestBody }>('/api/settings/providers/test', async (req, reply) => {
+    const b = req.body || {};
+    const endpoint = String(b.endpoint || '').trim();
+    const model = String(b.model || '').trim();
+    let apiKey = String(b.apiKey || '');
+    if (!endpoint) return reply.status(400).send({ error: 'endpoint required' });
+    if (!model) return reply.status(400).send({ error: 'model required' });
+    if (!apiKey && b.id) {
+      const s = await readSettings();
+      apiKey = s.customProviders.find((p) => p.id === b.id)?.apiKey || '';
+    }
+    if (!apiKey) return reply.status(400).send({ error: 'API key required' });
+    return await probeProvider({ endpoint, model, apiKey });
+  });
 
   app.delete<{ Params: { id: string } }>(
     '/api/settings/providers/:id',

@@ -9,7 +9,7 @@
 // We sit in front of the provider:
 //   GET /v1/models             → synthesize list from active provider config
 //   GET /v1/models/<name>      → synthesize a Model object for <name>
-//   POST /v1/messages          → forward to provider.endpoint verbatim,
+//   POST /v1/messages          → append /messages to the provider endpoint,
 //                                streaming the response back byte-by-byte
 //   * everything else          → return an empty {ok:true} 200 so probes
 //                                don't fail (best-effort — most CLI probes
@@ -20,6 +20,7 @@
 // provider is a custom one.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { anthropicMessagesUrl } from '../lib/anthropic-endpoint.js';
 import { readSettings } from '../lib/settings-store.js';
 
 async function findProvider(id: string) {
@@ -116,7 +117,7 @@ export async function registerRelayRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const upstreamUrl = `${p.endpoint.replace(/\/$/, '')}/messages`;
+      const upstreamUrl = anthropicMessagesUrl(p.endpoint);
       // Forward select client headers (streaming, anthropic-beta, etc.).
       const fwdHeaders: Record<string, string> = {
         'content-type': 'application/json',
@@ -147,7 +148,10 @@ export async function registerRelayRoutes(app: FastifyInstance): Promise<void> {
       const rawHeaders: Record<string, string> = {};
       upstream.headers.forEach((v, k) => {
         const lk = k.toLowerCase();
-        if (lk === 'content-length' || lk === 'transfer-encoding' || lk === 'connection') return;
+        // `fetch` already decoded the body, so passing the upstream
+        // content-encoding through makes the CLI try to brotli/gzip-decode
+        // plaintext SSE — it then stalls forever with a decompression error.
+        if (lk === 'content-length' || lk === 'content-encoding' || lk === 'transfer-encoding' || lk === 'connection') return;
         rawHeaders[k] = v;
       });
       reply.raw.writeHead(upstream.status, rawHeaders);
@@ -177,7 +181,7 @@ export async function registerRelayRoutes(app: FastifyInstance): Promise<void> {
   // permissions, telemetry). Return a bland 200 so probes don't kill the
   // session. Provider-specific POSTs that need real behavior will still
   // fail visibly if they matter; startup checks won't.
-  const stub = async (req: FastifyRequest, reply: FastifyReply) => {
+  const stub = async (_req: FastifyRequest, reply: FastifyReply) => {
     return reply.send({});
   };
   app.get('/relay/anthropic/:providerId/v1/*', stub);

@@ -7,6 +7,7 @@ import { api, type DirListing } from '../lib/api';
 // confirm-backdrop/dialog shell so it inherits the app's modal styling.
 export function DirPicker({ onPick, onClose }: { onPick: (cwd: string) => void; onClose: () => void }) {
   const [listing, setListing] = useState<DirListing | null>(null);
+  const [draft, setDraft] = useState(''); // editable address bar text; synced to the resolved path on every successful browse
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -16,7 +17,7 @@ export function DirPicker({ onPick, onClose }: { onPick: (cwd: string) => void; 
     setListing(null);
     api
       .listDirs(path)
-      .then((d) => setListing(d))
+      .then((d) => { setListing(d); setDraft(d.path); })
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
   }, []);
@@ -37,7 +38,16 @@ export function DirPicker({ onPick, onClose }: { onPick: (cwd: string) => void; 
     <div className="confirm-backdrop" onClick={onClose}>
       <div className="confirm-dialog dir-picker" role="dialog" aria-modal="true" aria-label="Choose a folder" onClick={(e) => e.stopPropagation()}>
         <div className="confirm-title">Choose a folder</div>
-        <div className="dir-picker-path" title={cur}>{cur || '…'}</div>
+        <input
+          className="dir-picker-path"
+          value={draft}
+          placeholder="…"
+          title="Paste or type a path, then press Enter"
+          spellCheck={false}
+          aria-label="Folder path"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && draft.trim()) browse(draft.trim()); }}
+        />
         <div className="dir-picker-list">
           {listing?.parent && (
             <button type="button" className="dir-picker-row dir-picker-up" onClick={() => browse(listing.parent!)}>

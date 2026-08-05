@@ -135,6 +135,10 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
     let sid: string | null = opts.resume ?? null;
     let turnId: string | null = null;
     let proc: CodexProc | null = null;
+    // Tail of the codex process stderr, appended to error events so a bare
+    // `error` notification with no message field still surfaces the real cause
+    // (auth failure, provider mismatch, config parse error, etc.).
+    let stderrTail = '';
     // Our approval-request id → the JSON-RPC request id we must reply on. Keyed
     // by a stable string (`<sid>:<requestId>`) so a reconnecting client and the
     // /approval route agree on which request they're answering.
@@ -149,7 +153,15 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
 
     try {
       if (!bin || !existsSync(bin)) throw new Error('codex binary not found (set MACARON_CODEX_PATH)');
-      proc = spawn(bin, ['app-server'], { stdio: ['pipe', 'pipe', 'ignore'] }) as CodexProc;
+      proc = spawn(bin, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as CodexProc;
+      // Keep stderr flowing so codex's real error text (auth, provider, config)
+      // is available to attach onto the RunnerEvent when the JSON-RPC error
+      // notification has no `message` field.
+      const stderr = (proc as unknown as { stderr: Readable }).stderr;
+      stderr?.on('data', (chunk: Buffer) => {
+        const s = chunk.toString();
+        stderrTail = (stderrTail + s).slice(-2000);
+      });
 
       let rpcId = 0;
       const sendRequest = (method: string, params: unknown): number => {
@@ -207,6 +219,9 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
 
       // --- item translation (item/started + item/completed) ----------------
       const emittedToolUse = new Set<string>();
+      // Track agentMessage itemIds we already emitted via delta streaming so
+      // the `item/completed` handler doesn't double-push the full text.
+      const streamedAgentText = new Set<string>();
       // Proposed file changes keyed by item id, captured from the fileChange
       // item so the fileChange approval request (which carries only an itemId)
       // can render the actual diff instead of an empty card.
@@ -216,6 +231,10 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
         const id = String(item.id ?? '');
         if (type === 'agentMessage') {
           if (phase !== 'completed') return;
+          // If we already streamed this message via item/agentMessage/delta,
+          // the client bubble already holds the full text — skip to avoid
+          // duplicating the whole reply as a second bubble.
+          if (streamedAgentText.has(id)) return;
           const text = String(item.text ?? '').trim();
           if (text) push({ kind: 'delta', text });
         } else if (type === 'reasoning') {
@@ -277,7 +296,15 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
           }
           return;
         }
-        if (typeof msg.method !== 'string') return; // a response to one of our requests
+        // JSON-RPC error response (thread/start / turn/start rejected by codex).
+        // Was silently swallowed before, leaving the client on a "did not start"
+        // fallback with no cause. Now we surface the message so the UI can show
+        // e.g. "wire_api = chat is no longer supported".
+        if (typeof msg.method !== 'string') {
+          const err = (msg.error as { message?: string; code?: number } | undefined);
+          if (err?.message) push({ kind: 'error', error: err.message });
+          return;
+        }
         const method = msg.method as string;
         const params = (msg.params ?? {}) as Record<string, unknown>;
         switch (method) {
@@ -296,6 +323,23 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
           case 'item/completed':
             handleItem('completed', params.item as Record<string, unknown>);
             break;
+          case 'item/agentMessage/delta': {
+            // Codex streams assistant text token-by-token. Push each fragment as
+            // a `delta` so the UI can append it to the current bubble.
+            const itemId = String(params.itemId ?? '');
+            const raw = params.delta as unknown;
+            let text = '';
+            if (typeof raw === 'string') text = raw;
+            else if (raw && typeof raw === 'object') {
+              const o = raw as { text?: unknown; content?: unknown; value?: unknown };
+              text = String(o.text ?? o.content ?? o.value ?? '');
+            }
+            if (text) {
+              if (itemId) streamedAgentText.add(itemId);
+              push({ kind: 'delta', text });
+            }
+            break;
+          }
           case 'turn/plan/updated':
             push({ kind: 'codex_plan', steps: (params.plan as Array<{ step: string; status: 'pending' | 'inProgress' | 'completed' }>) ?? [], explanation: (params.explanation as string) ?? null });
             break;
@@ -321,9 +365,11 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
             finish();
             break;
           }
-          case 'error':
-            push({ kind: 'error', error: (params.message as string) || 'codex stream error' });
+          case 'error': {
+            const msg = (params.message as string) || (params.error && typeof params.error === 'object' ? JSON.stringify(params.error) : '') || stderrTail.trim() || 'codex stream error';
+            push({ kind: 'error', error: msg });
             break;
+          }
         }
       };
 
@@ -341,7 +387,15 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
         }
       });
       proc.on('exit', (code) => {
-        if (!ended) { push({ kind: 'done', exitCode: code ?? -1 }); cleanup(); finish(); }
+        if (!ended) {
+          // Codex died before turn/completed → surface stderr so the failure
+          // isn't just a silent "exit -1" in the UI.
+          const tail = stderrTail.trim();
+          if (tail) push({ kind: 'error', error: tail });
+          push({ kind: 'done', exitCode: code ?? -1 });
+          cleanup();
+          finish();
+        }
       });
 
       // --- handshake -------------------------------------------------------
@@ -364,7 +418,14 @@ export function runCodexAppServer(opts: CodexRunOptions): AsyncGenerator<RunnerE
       tmpFiles = built.tmpFiles;
       const startTurn = async () => {
         for (let i = 0; i < 200 && !sid; i++) await new Promise((r) => setTimeout(r, 25));
-        if (!sid) { push({ kind: 'error', error: 'codex thread did not start' }); push({ kind: 'done', exitCode: -1 }); cleanup(); finish(); return; }
+        if (!sid) {
+          const tail = stderrTail.trim();
+          push({ kind: 'error', error: tail ? `codex thread did not start: ${tail}` : 'codex thread did not start' });
+          push({ kind: 'done', exitCode: -1 });
+          cleanup();
+          finish();
+          return;
+        }
         sendRequest('turn/start', { threadId: sid, input: built.input });
       };
       void startTurn();

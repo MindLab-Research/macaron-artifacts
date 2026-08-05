@@ -32,6 +32,7 @@ import {
 import { peekPendingCwd, takePendingCwd, takePendingPrompt } from '../lib/newSession';
 import { hasActiveModal } from '../lib/modal';
 import { extractPartialCode, parseFollowups } from '../lib/partialJson';
+import { cancelAutoSend, createScheduleBridge, type ScheduleBridge } from '../lib/autoSend';
 import { SlashPalette } from '../components/SlashPalette';
 import {
   THINKING_VERBS,
@@ -1331,6 +1332,10 @@ export function Session(props: SessionProps = {}) {
   const [sending, setSending] = useState(false);
   const [polling, setPolling] = useState(false);
   const [handoffPending, setHandoffPending] = useState(false);
+  // True once a turn has been started on THIS mount. Gates the GenUI
+  // countdown auto-send: re-opening a transcript remounts its widgets, and an
+  // armed countdown from a past turn must not fire again on the replay.
+  const turnStartedRef = useRef(false);
   // Notify the parent tile whenever the effective "running" state flips
   // (either an in-flight send OR the initial new-session SSE poll). Debounced
   // by a microtask so React batches state updates naturally.
@@ -2164,6 +2169,10 @@ export function Session(props: SessionProps = {}) {
       const effectivePermissionMode = opts?.permissionMode ?? permissionMode;
       const effectiveIsolate = opts?.isolate ?? isolate;
       if ((!text && sentImages.length === 0) || sending) return;
+      // Any new turn retires a countdown armed by the previous turn's widget,
+      // and marks this mount live so the NEXT widget's countdown may fire.
+      cancelAutoSend();
+      turnStartedRef.current = true;
       if (!opts) {
         mention.close();
         setInput('');
@@ -2588,24 +2597,40 @@ export function Session(props: SessionProps = {}) {
   // send() as a programmatic user turn. Only the focused session registers —
   // canvas multi-tile mounts share one slot, so the widget the user is actually
   // looking at owns the bridge.
+  // send() is re-created on every keystroke (input is a dep) and whenever a
+  // turn settles, so the bridge reads it through a ref: re-registering per
+  // render would run the cleanup below and kill an armed countdown before it
+  // could ever tick.
+  const sendRef = useRef(send);
+  sendRef.current = send;
   useEffect(() => {
     if (!focused) return;
     const g = globalThis as unknown as {
       '$app/chat'?: (prompt: string) => void;
+      '$app/chat/schedule'?: ScheduleBridge;
       sendUserMessage?: (prompt: string) => void;
     };
-    const bridge = (prompt: string) => { void send({ text: prompt }); };
+    const bridge = (prompt: string) => { void sendRef.current({ text: prompt }); };
     g['$app/chat'] = bridge;
+    // Countdown auto-send (a confirm widget with a default option). `isLive`
+    // is what keeps re-opening an old session from re-firing its commit —
+    // only a turn started on this mount counts.
+    g['$app/chat/schedule'] = createScheduleBridge({
+      send: bridge,
+      isBusy: () => runningRef.current,
+      isLive: () => turnStartedRef.current,
+    });
     // Also expose sendUserMessage as a bare global for widgets that forget
     // to `import { sendUserMessage } from '$macaron/chat'` — models drop the
     // import surprisingly often, and the resulting ReferenceError is fatal
     // to the whole onClick with no path to recover at runtime.
     g.sendUserMessage = bridge;
     return () => {
-      if (g['$app/chat'] === bridge) delete g['$app/chat'];
+      if (g['$app/chat'] === bridge) { delete g['$app/chat']; delete g['$app/chat/schedule']; }
       if (g.sendUserMessage === bridge) delete g.sendUserMessage;
+      cancelAutoSend();
     };
-  }, [focused, send]);
+  }, [focused]);
 
   // ---- Slash palette derivation + keyboard reconciliation ----------------
   // Open only while the input is a bare `/word` — leading slash, no space yet

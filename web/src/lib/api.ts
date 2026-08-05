@@ -152,6 +152,14 @@ export type ProviderInput = {
   apiKey?: string;
 };
 
+export type ProviderProbe = {
+  ok: boolean;
+  url: string;
+  status?: number;
+  latencyMs: number;
+  detail?: string;
+};
+
 export type AgentInput = {
   name: string;
   description: string;
@@ -211,6 +219,12 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
+    }),
+  testProvider: (input: Partial<ProviderInput> & { id?: string }) =>
+    req<ProviderProbe>('/api/settings/providers/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
     }),
   deleteProvider: (id: string) =>
     req<PublicSettings>(`/api/settings/providers/${encodeURIComponent(id)}`, {
@@ -416,6 +430,19 @@ export const api = {
   createPr: (project: string, sid: string, input: CreatePrRequest) =>
     req<CreatePrResult>(
       `/api/sessions/claude/${encodeURIComponent(project)}/${encodeURIComponent(sid)}/pr`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+    ),
+  // Project-scoped variants for callers (e.g. Codex Workspace) that want
+  // PR context / creation from a workspace cwd without needing a Claude sid.
+  prContextForProject: (project: string) =>
+    req<PrContext>(`/api/git/${encodeURIComponent(project)}/pr-context`, { method: 'GET' }),
+  createPrForProject: (project: string, input: CreatePrRequest) =>
+    req<CreatePrResult>(
+      `/api/git/${encodeURIComponent(project)}/pr`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -3,6 +3,8 @@ import { Menu, X } from 'lucide-react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { CodexSidebar } from './CodexSidebar';
 import { NotifyStack } from '../components/NotifyStack';
+import { ShortcutsHelp } from '../components/ShortcutsHelp';
+import { CodexCommandPalette } from './CodexCommandPalette';
 
 export function CodexApp() {
   const [navOpen, setNavOpen] = useState(false);
@@ -101,6 +103,8 @@ export function CodexApp() {
       )}
       <main className="cx-view" inert={navOpen} aria-hidden={navOpen || undefined}><Outlet /></main>
       <NotifyStack />
+      <ShortcutsHelp />
+      <CodexCommandPalette />
     </div>
   );
 }

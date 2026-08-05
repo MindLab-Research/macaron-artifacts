@@ -138,6 +138,27 @@ body {
   letter-spacing: 1.4px;
   color: var(--cx-muted);
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cx-sb-new-project {
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid var(--cx-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cx-muted);
+  font: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 100ms, color 100ms, border-color 100ms;
+}
+.cx-sb-new-project:hover {
+  background: var(--cx-hover);
+  border-color: var(--cx-border-strong);
+  color: var(--cx-text);
 }
 
 .cx-sb-list {
@@ -284,6 +305,136 @@ body {
   font-size: 13px;
 }
 .cx-sb-settings:hover { background: var(--cx-hover); color: var(--cx-text); }
+
+/* Top-level nav link that sits between the "New thread" button and the
+   WORKSPACES header (matches Claude sidebar's Examples row). */
+.cx-sb-nav-link {
+  padding: 8px 12px;
+  color: var(--cx-text-2);
+  text-decoration: none;
+  border-radius: var(--cx-radius-sm);
+  font-size: 13px;
+  transition: background 120ms, color 120ms;
+}
+.cx-sb-nav-link:hover { background: var(--cx-hover); color: var(--cx-text); }
+.cx-sb-nav-link.active { background: var(--cx-active); color: var(--cx-text); font-weight: 500; }
+
+/* Bottom tools cluster — the row of Skills / Agents / MCP / Hooks / Prompts /
+   Schedules / Usage / Shortcuts / Settings that sits between the workspace
+   list and the footer. Each link is a subtle text row that highlights on
+   hover; the active one gets the workspace-active background so the current
+   page is obvious at a glance. */
+.cx-sb-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+  border-top: 1px solid var(--cx-border);
+}
+.cx-sb-tool-link {
+  padding: 6px 12px;
+  color: var(--cx-text-2);
+  text-decoration: none;
+  border-radius: var(--cx-radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: background 100ms, color 100ms;
+}
+.cx-sb-tool-link:hover { background: var(--cx-hover); color: var(--cx-text); }
+.cx-sb-tool-link.active { background: var(--cx-active); color: var(--cx-text); font-weight: 500; }
+.cx-sb-shortcuts-btn { width: 100%; }
+.cx-sb-spacer { flex: 1; }
+.cx-sb-shortcuts-kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--cx-border-strong);
+  border-radius: 3px;
+  background: var(--cx-surface);
+  color: var(--cx-muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+/* Command palette (Cmd+K). Backdrop grays the page and captures clicks; the
+   inner panel stops propagation so clicking inside doesn't dismiss. Sized
+   like a small dialog offset from the top for a "spotlight" feel. */
+.cx-palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(24, 24, 27, 0.36);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 10vh 16px;
+}
+.cx-palette {
+  width: min(560px, 100%);
+  background: var(--cx-surface);
+  color: var(--cx-text);
+  border: 1px solid var(--cx-border);
+  border-radius: var(--cx-radius-lg);
+  box-shadow: var(--cx-shadow-3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.cx-palette-input {
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--cx-border);
+  background: transparent;
+  color: var(--cx-text);
+  font: inherit;
+  font-size: 14.5px;
+  outline: none;
+}
+.cx-palette-input::placeholder { color: var(--cx-muted); }
+.cx-palette-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.cx-palette-empty {
+  padding: 22px 16px;
+  color: var(--cx-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.cx-palette-item {
+  width: 100%;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  transition: background 60ms;
+}
+.cx-palette-item.active,
+.cx-palette-item:focus-visible { background: var(--cx-hover); outline: none; }
+.cx-palette-icon { color: var(--cx-muted); flex-shrink: 0; }
+.cx-palette-title { font-size: 13.5px; color: var(--cx-text); }
+.cx-palette-sub {
+  font-size: 11.5px;
+  color: var(--cx-muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
 .cx-sb-foot {
   border-top: 1px solid var(--cx-border);
   padding: 10px 8px 2px;
@@ -529,12 +680,8 @@ body {
 /* ---------- GenUI (render_ui) cards ---------- */
 
 .cx-genui {
-  margin: 12px 0 12px 0;
-  border: 1px solid var(--cx-border);
-  border-radius: var(--cx-radius-lg);
-  background: var(--cx-surface);
-  overflow: hidden;
-  box-shadow: var(--cx-shadow-1);
+  margin: 12px 0;
+  width: 100%;
 }
 .cx-genui-head {
   padding: 9px 12px;
@@ -1260,6 +1407,64 @@ body {
   gap: 12px;
   margin-bottom: 20px;
 }
+.cx-canvas-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cx-canvas-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: var(--cx-radius-sm);
+  color: var(--cx-text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 100ms, color 100ms, border-color 100ms;
+}
+.cx-canvas-action:hover {
+  background: var(--cx-hover);
+  border-color: var(--cx-border-strong);
+  color: var(--cx-text);
+}
+.cx-canvas-action.active {
+  background: var(--cx-active);
+  border-color: var(--cx-border-strong);
+  color: var(--cx-text);
+}
+/* Files-panel side column: the workspace layout collapses to a single
+   canvas column normally; opening the Files toggle pushes the canvas
+   right and reveals a 260px file browser on the left. Same shape as the
+   Claude bundle's .ws-canvas-body.with-files. */
+.cx-canvas-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.cx-canvas-body.with-files {
+  flex-direction: row;
+  gap: 12px;
+}
+.cx-canvas-body.with-files .cx-canvas-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.cx-canvas-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+@media (max-width: 768px) {
+  .cx-canvas-body.with-files { flex-direction: column; }
+}
 /* Inner title wraps name + meta; without its own gap the two spans jam
    together ("linfan1 pinned · 12 in workspace"). */
 .cx-canvas-title {
@@ -1359,6 +1564,10 @@ body {
   user-select: none;
   flex-shrink: 0;
   height: 38px;
+  /* Lift the grip above the absolutely-positioned N/NE/NW resize handles so
+     dragging the header still triggers dnd-kit reorder rather than resize. */
+  position: relative;
+  z-index: 6;
 }
 .cx-tile-grip:active { cursor: grabbing; }
 .cx-tile-grip-dots {
@@ -1428,9 +1637,14 @@ body {
 }
 .cx-tile-body .cx-main-scroll { padding: 0; }
 .cx-tile-body .cx-thread-body {
+  /* Full-width tiles: drop the 820px content column the full-page chat uses.
+     Otherwise a 1200px tile leaves ~200px of blank margin on each side and
+     the message list floats in the middle. */
+  max-width: none;
   padding: 14px 18px 8px;
   gap: 2px;
 }
+.cx-tile-body .cx-composer { max-width: none; }
 .cx-tile-body .cx-msg { padding: 10px 0; }
 .cx-tile-body .cx-msg-text { font-size: 13.5px; line-height: 1.6; }
 .cx-tile-body .cx-msg-role { font-size: 10.5px; margin-bottom: 3px; }
@@ -1455,6 +1669,40 @@ body {
 .cx-tile:hover .cx-tile-resize,
 .cx-tile.focused .cx-tile-resize { opacity: 0.7; }
 .cx-tile-resize:hover { opacity: 1; }
+
+/* Edge handles: thin invisible strips along all four sides, sized so they
+   overlap the tile border by a couple of pixels. Corner handles sit on top
+   of the edge strips at z-index 5 so grabbing a corner reliably picks the
+   diagonal resize rather than an adjacent edge. */
+.cx-tile-edge {
+  position: absolute;
+  /* Above the tile body / composer / textarea so pointerdown reaches us
+     rather than being swallowed by whatever is painted underneath. Must
+     beat the sticky composer wrap (z-index 10). */
+  z-index: 15;
+  background: transparent;
+  touch-action: none;
+}
+/* Positive offsets only — the parent tile has overflow:hidden, so any pixels
+   overhanging outside the border are clipped for hit-testing too. Keep the
+   strips fully inside the tile edge. */
+.cx-tile-edge.n { top: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+.cx-tile-edge.s { bottom: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+.cx-tile-edge.e { top: 12px; bottom: 12px; right: 0; width: 6px; cursor: ew-resize; }
+.cx-tile-edge.w { top: 12px; bottom: 12px; left: 0; width: 6px; cursor: ew-resize; }
+.cx-tile-corner {
+  position: absolute;
+  width: 14px; height: 14px;
+  /* Corners must beat the sticky composer wrap (z-index 10) that lives at
+     the bottom of every chat tile, and the grip at the top (z-index 6). */
+  z-index: 20;
+  background: transparent;
+  touch-action: none;
+}
+.cx-tile-corner.nw { top: 0; left: 0; cursor: nwse-resize; }
+.cx-tile-corner.ne { top: 0; right: 0; cursor: nesw-resize; }
+.cx-tile-corner.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+/* SE corner keeps its visible diagonal-lines chevron via .cx-tile-resize. */
 
 /* ---------- Composer show/hide animation ----------
    Uses grid-template-rows 0fr↔1fr so height interpolates to the child's
@@ -1948,4 +2196,164 @@ body {
   .notify-card,
   .confirm-backdrop,
   .confirm-dialog { animation: none; }
+}
+
+/* Preferences pane (Appearance / Notifications / Sound / Remote / Config).
+   The Sound / RemoteAccess / ConfigFilesSection components are imported
+   from the Claude Settings view — they render inside .settings-view chrome
+   assumptions. The .cx-settings-borrowed wrapper isolates that scope so
+   their .settings-section / .settings-input / .settings-hint styles don't
+   clash with the Codex right-pane's own tokens. */
+.cx-theme-seg {
+  display: inline-flex;
+  border: 1px solid var(--cx-border);
+  border-radius: var(--cx-radius-sm);
+  overflow: hidden;
+}
+.cx-theme-seg-btn {
+  padding: 6px 14px;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--cx-border);
+  color: var(--cx-text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.cx-theme-seg-btn:last-child { border-right: 0; }
+.cx-theme-seg-btn:hover { background: var(--cx-hover); }
+.cx-theme-seg-btn.active { background: var(--cx-active); color: var(--cx-text); font-weight: 500; }
+.cx-toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.cx-toggle-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cx-text);
+  cursor: pointer;
+}
+.cx-field-hint {
+  margin: 6px 0 0;
+  color: var(--cx-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cx-settings-borrowed {
+  padding: 0;
+  border: 1px solid var(--cx-border);
+  border-radius: var(--cx-radius);
+  background: var(--cx-surface);
+  margin-top: 16px;
+}
+.cx-settings-borrowed .settings-section {
+  padding: 14px 16px;
+  border: 0;
+}
+.cx-settings-borrowed .sec-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cx-text);
+}
+.cx-settings-borrowed .settings-hint {
+  color: var(--cx-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cx-settings-borrowed input[type="text"],
+.cx-settings-borrowed input[type="password"],
+.cx-settings-borrowed input[type="url"],
+.cx-settings-borrowed textarea,
+.cx-settings-borrowed select {
+  background: var(--cx-bg);
+  border: 1px solid var(--cx-border);
+  border-radius: var(--cx-radius-sm);
+  padding: 6px 10px;
+  color: var(--cx-text);
+  font: inherit;
+  font-size: 13px;
+}
+.cx-settings-borrowed button {
+  cursor: pointer;
+}
+
+/* Top-of-sidebar "Search threads" button. Mirrors the Claude sidebar's
+   .sb-search block — big rounded input-shaped affordance that opens the
+   command palette (which now searches threads + workspaces + commands). */
+.cx-sb-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: var(--cx-radius-sm);
+  color: var(--cx-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.cx-sb-search:hover {
+  background: var(--cx-hover);
+  border-color: var(--cx-border-strong);
+}
+.cx-sb-search-icon { color: var(--cx-muted); display: inline-flex; }
+.cx-sb-search-label { flex: 1; text-align: left; }
+.cx-sb-search-kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--cx-border-strong);
+  border-radius: 3px;
+  background: var(--cx-surface);
+  color: var(--cx-muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+/* Inline thread rename — swaps the .cx-sb-thread-main button for a text
+   input while renamingSid matches. Kept the same footprint so the row
+   doesn't jump; input inherits the row's height and thread-title font. */
+.cx-sb-thread-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--cx-border-strong);
+  border-radius: 4px;
+  background: var(--cx-surface);
+  color: var(--cx-text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.cx-sb-thread-rename:focus { border-color: var(--cx-good, #4d8f5b); }
+
+/* Small icon-only action button that sits in the chat header (Download the
+   transcript, and any future single-shot toolbar action). Muted by default,
+   fills in on hover, disabled state greys out. */
+.cx-main-head-action {
+  margin-left: 4px;
+  padding: 4px 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--cx-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 100ms, color 100ms;
+}
+.cx-main-head-action:hover:not(:disabled) {
+  background: var(--cx-hover);
+  color: var(--cx-text);
+}
+.cx-main-head-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

@@ -11,6 +11,7 @@ description: "Whenever you would ask the user a question — pick between option
 
 ## When this fires (non-exhaustive)
 
+- **Commit / push gate**: "want me to commit this?", "should I push?", "open a PR?" — the end-of-work hand-off. Two buttons, and optionally a default with a countdown (template C).
 - **Choice**: "Pick a framework", "which of these files did you mean", "A or B?", boolean confirms.
 - **Form**: any request for structured input — name/email/config values, migration parameters, tuning knobs.
 - **Adjustment**: pick a color, resize a padding, choose a threshold. Slider / color picker / preview + apply beats "give me a number".
@@ -103,7 +104,46 @@ export default function App() {
 }
 ```
 
-### C. Confirm before destructive
+### C. Commit gate (with a default + countdown)
+
+The most common question a coding agent asks — "want me to commit this?" — is also the one most often typed as prose. It is two buttons.
+
+Add the countdown ONLY when the session gives you evidence the user wants the default to just happen: they said "just commit" / "don't ask me", or they've approved the same thing several times already. No evidence → same card, drop the `useAutoSend` line and the `(Ns)` suffix.
+
+```tsx
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Row, Button, Text } from '$macaron/ui';
+import { sendUserMessage, useAutoSend } from '$macaron/chat';
+
+const COMMIT = 'Commit it.';
+const SKIP = "Don't commit — leave the changes in the working tree.";
+
+export default function App() {
+  // Counts down and sends COMMIT if the user does nothing; `left` is the seconds
+  // remaining, or null when nothing is counting (e.g. a re-opened transcript —
+  // the host refuses to arm there, so the buttons stay but the timer doesn't).
+  const left = useAutoSend(COMMIT, 30);
+
+  return (
+    <Card className="max-w-md">
+      <CardHeader>
+        <CardTitle>Commit these changes?</CardTitle>
+        <CardDescription>3 files, +82 −14 — `feat: add retry to the upload queue`</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Row className="gap-2 justify-end items-center">
+          {left !== null && <Text className="text-xs opacity-60 mr-auto">Committing automatically in {left}s</Text>}
+          <Button variant="ghost" onClick={() => sendUserMessage(SKIP)}>Don't commit</Button>
+          <Button onClick={() => sendUserMessage(COMMIT)}>Commit{left !== null ? ` (${left}s)` : ''}</Button>
+        </Row>
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+Show the file/diff summary in the card — the user is approving a specific change, and a bare "Commit?" makes the button meaningless. Same shape for push / open-a-PR / apply-migration gates.
+
+### D. Confirm before destructive
 
 ```tsx
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Row, Button } from '$macaron/ui';
@@ -134,3 +174,6 @@ export default function App() {
 - Making buttons that just log or alert instead of calling `sendUserMessage`. — The next turn never sees the click.
 - Forgetting to import `sendUserMessage` (`import { sendUserMessage } from '$macaron/chat';`). Bare call also works via `globalThis.sendUserMessage`, but the import is the documented path.
 - Emitting a widget without a `reply` payload string on each option — the next turn can't tell what was chosen.
+- Arming a countdown the user never asked for, or one whose remaining seconds aren't visible on the button. Both turn "convenient" into "it committed behind my back".
+- Passing a different string to `useAutoSend` than to the default button's `sendUserMessage` — clicking early then does something other than what the label promised.
+- Rolling your own `setTimeout` inside the widget instead of `useAutoSend` — a widget-local timer re-fires every time the transcript is re-opened.

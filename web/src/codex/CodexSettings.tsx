@@ -10,6 +10,20 @@ import {
   type PublicCodexProvider,
   type PublicCodexSettings,
 } from './api';
+// Engine-agnostic Preferences sections reused from the Claude Settings view.
+// They talk to user-scope endpoints (/api/tunnel, /api/config-files,
+// /api/push) that both bundles' users share on the same machine, so a Codex
+// user can flip theme / push / tunnel / config files without leaving the app.
+import { RemoteAccess, ConfigFilesSection, SoundSettings } from '../views/Settings';
+import { useTheme, setTheme, type Theme } from '../lib/theme';
+import { getPushState, subscribeToPush, unsubscribeFromPush, type PushState } from '../lib/pwa';
+import { useToast } from '../components/Toast';
+
+const THEME_OPTIONS: { value: Theme; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 const REASONING = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 const SANDBOX = ['read-only', 'workspace-write', 'danger-full-access'] as const;
@@ -109,11 +123,107 @@ export function CodexSettings() {
                 />
               : <div className="cx-settings-empty">Select a provider on the left.</div>}
           <RuntimePane runtime={settings.runtime} onAfterMutate={setSettings} flash={flash} />
+          <PreferencesPane />
         </div>
       </div>
 
       {msg && <div className="cx-settings-flash">{msg}</div>}
     </div>
+  );
+}
+
+// The Preferences pane bundles engine-agnostic settings that the Claude side
+// has as top-level sections (Appearance / Notifications / Sound / Remote
+// access / Config files). They live under the Codex Settings' right pane so
+// a Codex-only user gets the same toggles without having to open the Claude
+// bundle.
+function PreferencesPane() {
+  const { theme, resolved } = useTheme();
+  const [pushState, setPushState] = useState<PushState>('unsupported');
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    void getPushState().then(setPushState);
+  }, []);
+
+  const togglePush = async (next: boolean) => {
+    setBusy(true);
+    try {
+      const s = next ? await subscribeToPush() : await unsubscribeFromPush();
+      setPushState(s);
+      if (next && s === 'denied') toast('notifications blocked — enable them for this site in your browser');
+      else if (next && s === 'subscribed') toast('push notifications on');
+      else if (!next) toast('push notifications off');
+    } catch (e) {
+      toast(`error: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pushLabel = pushState === 'subscribed' ? 'On' : pushState === 'denied' ? 'Blocked' : pushState === 'unsupported' ? 'Unavailable' : 'Off';
+
+  return (
+    <>
+      <section className="cx-settings-section">
+        <div className="cx-section-head"><h2>Appearance</h2></div>
+        <div className="cx-field">
+          <div className="cx-theme-seg" role="radiogroup" aria-label="Theme">
+            {THEME_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={theme === o.value}
+                className={'cx-theme-seg-btn' + (theme === o.value ? ' active' : '')}
+                onClick={() => setTheme(o.value)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <p className="cx-field-hint">
+            {theme === 'system' ? `Following your system preference (currently ${resolved}).` : `Always ${theme}.`}
+          </p>
+        </div>
+      </section>
+
+      <section className="cx-settings-section">
+        <div className="cx-section-head"><h2>Notifications</h2></div>
+        <div className="cx-field">
+          <label className="cx-toggle-row">
+            <input
+              type="checkbox"
+              checked={pushState === 'subscribed'}
+              disabled={busy || pushState === 'unsupported' || pushState === 'denied'}
+              onChange={(e) => void togglePush(e.target.checked)}
+            />
+            <span>Push notifications ({pushLabel})</span>
+          </label>
+          <p className="cx-field-hint">
+            Get a system notification when a session finishes a turn or needs a permission decision — even with the tab closed.
+            {pushState === 'unsupported' && ' Unavailable here (needs HTTPS or a mobile home-screen install).'}
+            {pushState === 'denied' && ' Blocked. Re-enable notifications for this site in your browser settings, then reload.'}
+          </p>
+        </div>
+      </section>
+
+      {/* SoundSettings / RemoteAccess / ConfigFilesSection are imported from
+          the Claude Settings view; they already render their own headers and
+          call engine-agnostic /api endpoints, so they drop in unchanged. */}
+      <section className="cx-settings-section cx-settings-borrowed">
+        <SoundSettings />
+      </section>
+
+      <section className="cx-settings-section cx-settings-borrowed">
+        <RemoteAccess />
+      </section>
+
+      <section className="cx-settings-section cx-settings-borrowed">
+        <ConfigFilesSection />
+      </section>
+    </>
   );
 }
 

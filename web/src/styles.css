@@ -3404,6 +3404,7 @@ textarea:focus, select:focus, input:focus {
 /* ---------- directory picker ---------- */
 .dir-picker { min-width: 420px; max-width: 560px; }
 .dir-picker-path {
+  width: 100%;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--muted);
@@ -3412,12 +3413,8 @@ textarea:focus, select:focus, input:focus {
   border-radius: 8px;
   padding: 7px 10px;
   margin-bottom: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl; /* keep the tail (deepest folder) visible when truncated */
-  text-align: left;
 }
+.dir-picker-path:focus { color: var(--text); outline: 1px solid var(--accent); border-color: var(--accent); }
 .dir-picker-list {
   height: 300px;
   overflow-y: auto;

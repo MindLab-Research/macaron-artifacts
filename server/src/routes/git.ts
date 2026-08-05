@@ -161,4 +161,38 @@ export async function registerGitRoutes(app: FastifyInstance): Promise<void> {
       }
     },
   );
+
+  // Engine-agnostic project-scoped variants. The session-scoped routes above
+  // are keyed on a Claude sid; the Codex bundle (and any other caller that
+  // just wants "PR from this workspace's cwd") uses these instead.
+  app.get<{ Params: ProjectParams }>(
+    '/api/git/:project/pr-context',
+    async ({ params }, reply) => {
+      try {
+        return await g.getPrContext(await cwdOf(params.project));
+      } catch (e) {
+        return reply.status(400).send({ error: (e as Error).message });
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParams; Body: CreatePrRequest }>(
+    '/api/git/:project/pr',
+    async ({ params, body }, reply) => {
+      const title = String(body?.title || '').trim();
+      if (!title) return reply.status(400).send({ error: 'title required' });
+      try {
+        return await g.createPr(
+          await cwdOf(params.project),
+          {
+            title,
+            body: String(body?.body || ''),
+            draft: Boolean(body?.draft),
+          },
+        );
+      } catch (e) {
+        return reply.status(400).send({ error: (e as Error).message });
+      }
+    },
+  );
 }

@@ -17,6 +17,7 @@ import path from 'node:path';
 import type { Block, Message, SessionDetail, SessionListItem } from '@macaron/shared';
 import { CODEX_SESSIONS } from '../config.js';
 import { deleteCodexTitle, getCodexTitle } from './codex-titles.js';
+import { getLabels } from './label-store.js';
 
 type CodexMeta = {
   id: string;
@@ -119,6 +120,8 @@ export function encodeCodexProjectName(cwd: string): string {
 export async function listCodexSessions(): Promise<SessionListItem[]> {
   const out: SessionListItem[] = [];
   const stack: string[] = [];
+  // Cached label map for the whole list — one read per listCodexSessions call.
+  const labels = await getLabels().catch(() => ({} as Record<string, string>));
   try {
     await fs.access(CODEX_SESSIONS);
   } catch {
@@ -162,6 +165,9 @@ export async function listCodexSessions(): Promise<SessionListItem[]> {
           sessionId: sid,
           preview: (summary.firstUserText || '').slice(0, 220),
           title: getCodexTitle(sid),
+          // Manual label wins in sessionTitle over ai-title / preview / sid,
+          // so a Codex user's rename shows immediately in the sidebar.
+          label: labels[sid],
           messageCount: summary.approxMessages,
           messageCountSuffix: '',
           mtime: st.mtimeMs,

@@ -25,6 +25,10 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         codex: path.resolve(__dirname, 'codex.html'),
         kimi: path.resolve(__dirname, 'kimi.html'),
+        // Clickability smoke harness (scripts/smoke/clickable.mjs). Not linked
+        // from any UI; built so the check can run against the real dist output
+        // instead of a hand-rolled page that could drift from production.
+        clickable: path.resolve(__dirname, 'clickable.html'),
       },
     },
   },

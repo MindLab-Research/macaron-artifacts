@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { anthropicMessagesUrl } from '../lib/anthropic-endpoint.js';
 import {
   deleteSession,
   duplicateSession,
@@ -260,8 +261,7 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
           'One paragraph, no more than 250 words.',
       });
 
-      const endpoint = provider.endpoint.replace(/\/+$/, '');
-      const url = endpoint.endsWith('/v1') ? `${endpoint}/messages` : `${endpoint}/v1/messages`;
+      const url = anthropicMessagesUrl(provider.endpoint);
       let apiRes: Response;
       try {
         apiRes = await fetch(url, {

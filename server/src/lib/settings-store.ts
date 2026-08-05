@@ -13,6 +13,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { HOME, HOST, PORT, MACARON_API_BASE, MACARON_API_KEY, MACARON_MODEL } from '../config.js';
+import { normalizeAnthropicBase } from './anthropic-endpoint.js';
 
 // The built-in pass-through provider. Never touches the SDK subprocess env —
 // it inherits process.env unchanged. Whatever ANTHROPIC_BASE_URL /
@@ -211,7 +212,7 @@ function sanitizeProvider(p: CustomProvider): CustomProvider {
   return {
     id: String(p.id || randomUUID()),
     name: String(p.name || '').trim() || 'Unnamed provider',
-    endpoint: String(p.endpoint || '').trim(),
+    endpoint: normalizeAnthropicBase(String(p.endpoint || '')),
     model: String(p.model || '').trim(),
     apiKey: String(p.apiKey || ''),
   };
@@ -373,7 +374,7 @@ export async function seedProviderFromEnv(): Promise<
   if (/^(1|true|yes)$/i.test(process.env.MACARON_DISABLE_ENV_PROVIDER_SEED || '')) {
     return { seeded: false, reason: 'disabled' };
   }
-  const endpoint = (process.env.MACARON_PROVIDER_ENDPOINT || process.env.ANTHROPIC_BASE_URL || '').trim();
+  const endpoint = normalizeAnthropicBase(process.env.MACARON_PROVIDER_ENDPOINT || process.env.ANTHROPIC_BASE_URL || '');
   const token = (process.env.MACARON_PROVIDER_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || '').trim();
   if (!endpoint || !token) return { seeded: false, reason: 'missing-env' };
   const model = (process.env.MACARON_PROVIDER_MODEL || process.env.ANTHROPIC_MODEL || 'macaron-v1-venti').trim();

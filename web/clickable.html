@@ -1,0 +1,18 @@
+<!doctype html>
+<!--
+  Harness page for the clickability check (scripts/smoke/clickable.mjs). Mounts
+  model-generated TSX through the REAL GenuiPreview + StaticGenUIRenderer (same
+  TSX compiler and import map production uses) and wires $macaron/chat to the
+  real createScheduleBridge, so a Playwright click exercises the same path a
+  user's click does. Not linked from the app; built as its own Vite entry.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>GenUI clickability harness</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/clickable-harness.tsx"></script>
+  </body>
+</html>

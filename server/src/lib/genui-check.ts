@@ -57,7 +57,8 @@ const compilerOptions: ts.CompilerOptions = {
 // wrapper (which would require module-ifying the file) needed.
 const AMBIENT_DECLARATIONS =
   `declare module "https://*";\ndeclare module "http://*";\n` +
-  `declare module "$macaron/chat" {\n  export function sendUserMessage(prompt: string): void;\n}\n` +
+  `declare module "$macaron/chat" {\n  export function sendUserMessage(prompt: string): void;\n` +
+  `  export function useAutoSend(prompt: string, seconds?: number): number | null;\n}\n` +
   `interface Window {\n  sendUserMessage(prompt: string): void;\n}\n`;
 
 const toDiag = (d: ts.Diagnostic): GenUIDiagnostic => {

@@ -83,6 +83,19 @@ export const codexApi = {
     const r = await authedFetch(`/api/codex/threads/${encodeURIComponent(sid)}`, { method: 'DELETE' });
     if (!r.ok) throw new Error(`http ${r.status}`);
   },
+  // Rename a thread. Blank name clears the override so the sidebar falls
+  // back to the ai-title / first-user-prompt preview. Backed by the
+  // engine-agnostic label sidecar so both Claude and Codex share the same
+  // user-visible name for a given sid.
+  setThreadLabel: (sid: string, name: string) =>
+    reqJSON<{ ok: boolean; label: string }>(
+      `/api/codex/threads/${encodeURIComponent(sid)}/label`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      },
+    ),
   stopThread: (sid: string) =>
     reqJSON<{ ok: boolean; running: boolean }>(
       `/api/codex/threads/${encodeURIComponent(sid)}/stop`,

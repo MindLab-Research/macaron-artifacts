@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Paperclip, X, Square, ArrowUp } from 'lucide-react';
 import { CodexProviderPicker } from './CodexProviderPicker';
 import { CodexRuntimePicker } from './CodexRuntimePicker';
 import type { CodexRuntimeOverride } from './api';
+import { useFileMention } from '../components/MentionPopup';
+import { SlashPalette } from '../components/SlashPalette';
+import { api, type SlashCommand } from '../lib/api';
 
 export type ComposerImage = { id: string; name: string; mimeType: string; dataUrl: string };
 
@@ -35,6 +38,7 @@ export function CodexComposer({
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
   const [dragOver, setDragOver] = useState(false);
   useEffect(() => {
     const el = ref.current;
@@ -42,6 +46,65 @@ export function CodexComposer({
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 220) + 'px';
   }, [value]);
+
+  // @-mention file picker (fuzzy search of the workspace's tracked files).
+  // Same hook + popup as the Claude composer, so a Codex user typing `@foo`
+  // gets the same live-filtered file list. Requires a project id — if the
+  // composer is used outside a workspace (rare), the hook silently no-ops.
+  const mention = useFileMention({
+    project,
+    value,
+    setValue: onChange,
+    textareaRef: ref,
+    composingRef,
+  });
+
+  // Slash-command palette: same user-scope commands the Claude composer offers
+  // (~/.claude/commands + workspace .claude/commands). Palette opens while the
+  // input is a bare `/word` (no space yet); Enter picks the highlighted one.
+  const [commands, setCommands] = useState<SlashCommand[]>([]);
+  const [slashIdx, setSlashIdx] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    api.commands(project).then((r) => { if (alive) setCommands(r.commands); }).catch(() => {});
+    return () => { alive = false; };
+  }, [project]);
+  const slashQuery = value.startsWith('/') && !value.includes(' ') ? value.slice(1) : null;
+  const filteredCommands = useMemo(() => {
+    if (slashQuery === null) return [];
+    const q = slashQuery.toLowerCase();
+    return commands.filter((c) => c.name.toLowerCase().includes(q) || (c.namespace ?? '').toLowerCase().includes(q));
+  }, [commands, slashQuery]);
+  const paletteOpen = slashQuery !== null && filteredCommands.length > 0;
+  useEffect(() => { setSlashIdx(0); }, [slashQuery]);
+  const pickCommand = (cmd: SlashCommand) => {
+    // Insert `/name ` (trailing space) — the trailing space closes the
+    // palette (bare `/word` predicate goes false) AND readies args.
+    onChange(`/${cmd.name} `);
+  };
+  const handlePaletteKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (e.nativeEvent.isComposing || composingRef.current) return false;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSlashIdx((i) => Math.min(i + 1, filteredCommands.length - 1));
+      return true;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSlashIdx((i) => Math.max(i - 1, 0));
+      return true;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      const cmd = filteredCommands[slashIdx];
+      if (cmd) { e.preventDefault(); pickCommand(cmd); return true; }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onChange((value.startsWith('/') && !value.includes(' ') ? value + ' ' : value));
+      return true;
+    }
+    return false;
+  };
 
   const addFiles = async (files: FileList | File[]) => {
     const accepted: ComposerImage[] = [];
@@ -59,6 +122,12 @@ export function CodexComposer({
   };
 
   const key = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash palette intercepts first (only fires when open with matches),
+    // then @-mention popup, then the composer's own submit path — matches
+    // Claude composer's precedence so behaviour is identical when both
+    // popups happen to fight for the same key.
+    if (paletteOpen && handlePaletteKey(e)) return;
+    if (mention.onKeyDown(e)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!disabled && (value.trim() || images.length)) onSubmit();
@@ -110,11 +179,22 @@ export function CodexComposer({
           >
             <Paperclip size={16} strokeWidth={2} aria-hidden="true" />
           </button>
+          {paletteOpen && (
+            <SlashPalette
+              commands={filteredCommands}
+              activeIndex={slashIdx}
+              onPick={pickCommand}
+              onHover={setSlashIdx}
+            />
+          )}
+          {mention.popup}
           <textarea
             ref={ref}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={key}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
             onPaste={(e) => {
               const files: File[] = [];
               for (const item of Array.from(e.clipboardData.items)) {

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Check, Circle, Plus, X, Settings } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, Check, Circle, Plus, Search, X, Settings } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { assetUrl } from '../lib/assetBase';
 import { codexApi, type CodexThread, type CodexWorkspace } from './api';
@@ -8,11 +8,13 @@ import {
   toggleCanvasSid,
   focusCanvasSid,
   subscribeCanvas,
+  addDraftSid,
 } from '../lib/canvas';
 import { subscribeSystemEvents } from '../lib/systemEvents';
 import { useConfirm } from '../components/Confirm';
 import { useToast } from '../components/Toast';
 import { sessionTitle } from '../lib/api';
+import { NewProjectModal } from '../components/NewProjectModal';
 
 type WsData = CodexWorkspace & { sessions: CodexThread[] };
 
@@ -30,6 +32,13 @@ export function CodexSidebar({ onNavigate }: {
   const [status, setStatus] = useState<'connecting' | 'ok' | 'bad'>('connecting');
   const [providerLabel, setProviderLabel] = useState('');
   const [canvasBy, setCanvasBy] = useState<Record<string, string[]>>({});
+  const [showNewProject, setShowNewProject] = useState(false);
+  // Inline rename state: sid whose title is currently in edit mode + draft
+  // value. Committing writes via codexApi.setThreadLabel (engine-agnostic
+  // label sidecar); Escape cancels without a request.
+  const [renamingSid, setRenamingSid] = useState('');
+  const [renameDraft, setRenameDraft] = useState('');
+  const renameDoneRef = useRef(false);
   const confirm = useConfirm();
   const toast = useToast();
   const navigate = useNavigate();
@@ -113,6 +122,28 @@ export function CodexSidebar({ onNavigate }: {
     return n;
   });
 
+  const startRename = (sid: string, current: string) => {
+    renameDoneRef.current = false;
+    setRenamingSid(sid);
+    setRenameDraft(current);
+  };
+  const commitRename = async (sid: string) => {
+    if (renameDoneRef.current) return;
+    renameDoneRef.current = true;
+    const name = renameDraft.trim();
+    setRenamingSid('');
+    try {
+      await codexApi.setThreadLabel(sid, name);
+      await load();
+    } catch (err) {
+      toast(`rename failed: ${(err as Error).message}`);
+    }
+  };
+  const cancelRename = () => {
+    renameDoneRef.current = true;
+    setRenamingSid('');
+  };
+
   const del = async (e: React.MouseEvent, sid: string) => {
     e.stopPropagation();
     const ok = await confirm({
@@ -146,12 +177,62 @@ export function CodexSidebar({ onNavigate }: {
         </div>
       </Link>
 
-      <button className="cx-sb-new" onClick={() => { navigate('/'); onNavigate?.(); }}>
+      <button
+        className="cx-sb-new"
+        onClick={() => {
+          // In a workspace: drop a draft tile onto that workspace's canvas
+          // so the new thread lives alongside pinned ones instead of jumping
+          // out to a full-screen root. Outside any workspace: fall back to
+          // the plain "/" composer.
+          if (activeProject) {
+            addDraftSid(activeProject);
+            navigate(`/w/${encodeURIComponent(activeProject)}`);
+          } else {
+            navigate('/');
+          }
+          onNavigate?.();
+        }}
+      >
         <Plus size={14} aria-hidden="true" />
         <span>New thread</span>
       </button>
 
-      <div className="cx-sb-label"><span>WORKSPACES</span></div>
+      <button
+        type="button"
+        className="cx-sb-search"
+        onClick={() => {
+          onNavigate?.();
+          window.requestAnimationFrame(() => {
+            window.dispatchEvent(new CustomEvent('macaron:open-search'));
+          });
+        }}
+        title="Search threads (Cmd+K)"
+      >
+        <span className="cx-sb-search-icon"><Search size={14} aria-hidden="true" /></span>
+        <span className="cx-sb-search-label">Search threads</span>
+        <kbd className="cx-sb-search-kbd" aria-hidden="true">⌘K</kbd>
+      </button>
+
+      <Link
+        className={'cx-sb-nav-link' + (location.pathname === '/examples' ? ' active' : '')}
+        to="/examples"
+        onClick={onNavigate}
+      >
+        <span>Examples</span>
+      </Link>
+
+      <div className="cx-sb-label">
+        <span>WORKSPACES</span>
+        <button
+          type="button"
+          className="cx-sb-new-project"
+          onClick={() => { onNavigate?.(); setShowNewProject(true); }}
+          title="New project (create dir or clone a repo)"
+          aria-label="New project"
+        >
+          + new
+        </button>
+      </div>
 
       <div className="cx-sb-list">
         {workspaces.length === 0 && (
@@ -186,22 +267,39 @@ export function CodexSidebar({ onNavigate }: {
                         key={s.sessionId}
                         className={'cx-sb-thread' + (pinned ? ' pinned' : '')}
                       >
-                        <button
-                          type="button"
-                          className="cx-sb-thread-main"
-                          title={s.cwd}
-                          onClick={() => {
-                            // Click to add to canvas; re-click on pinned focuses it.
-                            if (!pinned) toggleCanvasSid(w.project, s.sessionId);
-                            else focusCanvasSid(w.project, s.sessionId);
-                            if (activeProject !== w.project) {
-                              navigate(`/w/${encodeURIComponent(w.project)}`);
-                            }
-                            onNavigate?.();
-                          }}
-                        >
-                          <span className="cx-sb-thread-title">{label}</span>
-                        </button>
+                        {renamingSid === s.sessionId ? (
+                          <input
+                            type="text"
+                            className="cx-sb-thread-rename"
+                            value={renameDraft}
+                            autoFocus
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onBlur={() => { void commitRename(s.sessionId); }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); void commitRename(s.sessionId); }
+                              else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="cx-sb-thread-main"
+                            title={s.cwd}
+                            onClick={() => {
+                              // Click to add to canvas; re-click on pinned focuses it.
+                              if (!pinned) toggleCanvasSid(w.project, s.sessionId);
+                              else focusCanvasSid(w.project, s.sessionId);
+                              if (activeProject !== w.project) {
+                                navigate(`/w/${encodeURIComponent(w.project)}`);
+                              }
+                              onNavigate?.();
+                            }}
+                            onDoubleClick={(e) => { e.stopPropagation(); startRename(s.sessionId, label); }}
+                          >
+                            <span className="cx-sb-thread-title">{label}</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={'cx-sb-thread-pin' + (pinned ? ' pinned' : '')}
@@ -238,10 +336,30 @@ export function CodexSidebar({ onNavigate }: {
 
       <div className="cx-sb-grow" />
 
-      <Link className="cx-sb-settings" to="/settings" onClick={onNavigate}>
-        <span><Settings size={16} aria-hidden="true" /></span>
-        <span>Settings</span>
-      </Link>
+      <div className="cx-sb-tools">
+        <Link className={'cx-sb-tool-link' + (location.pathname === '/usage' ? ' active' : '')} to="/usage" onClick={onNavigate}>
+          <span>Usage</span>
+        </Link>
+        <button
+          type="button"
+          className="cx-sb-tool-link cx-sb-shortcuts-btn"
+          onClick={() => {
+            onNavigate?.();
+            window.requestAnimationFrame(() => {
+              window.dispatchEvent(new CustomEvent('macaron:shortcuts'));
+            });
+          }}
+          title="Keyboard shortcuts"
+        >
+          <span>Shortcuts</span>
+          <span className="cx-sb-spacer" />
+          <kbd className="cx-sb-shortcuts-kbd" aria-hidden="true">?</kbd>
+        </button>
+        <Link className={'cx-sb-tool-link' + (location.pathname === '/settings' ? ' active' : '')} to="/settings" onClick={onNavigate}>
+          <span><Settings size={13} aria-hidden="true" /></span>
+          <span>Settings</span>
+        </Link>
+      </div>
 
       <footer className="cx-sb-foot">
         <div className={'cx-sb-status cx-sb-status-' + status}>
@@ -249,6 +367,18 @@ export function CodexSidebar({ onNavigate }: {
           {status === 'ok' ? providerLabel || 'online' : status === 'bad' ? 'config missing' : 'connecting…'}
         </div>
       </footer>
+
+      {showNewProject && (
+        <NewProjectModal
+          onClose={() => setShowNewProject(false)}
+          onCreated={(project) => {
+            setShowNewProject(false);
+            void load();
+            navigate(`/w/${encodeURIComponent(project)}`);
+            onNavigate?.();
+          }}
+        />
+      )}
     </aside>
   );
 }

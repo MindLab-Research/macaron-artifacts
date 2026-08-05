@@ -38,6 +38,15 @@ import {
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
 import { registerRun, abortRun, endRun } from '../lib/active-runs.js';
+import { pushPermissionRequest, pushSessionDone } from '../lib/push-notify.js';
+import { setLabel } from '../lib/label-store.js';
+
+// Codex threads don't have a "project" the way Claude sessions do (each
+// thread lives on the ~/.codex/sessions rollout, not under CLAUDE_PROJECTS),
+// but push-notify keys by (project, sid). The push service just uses those
+// strings as an opaque bucket; use a fixed 'codex' key so all Codex thread
+// events group cleanly in a client's notification history.
+const CODEX_PUSH_PROJECT = 'codex';
 import type { AttachedImage } from '../lib/claude-runner.js';
 import type { SessionStreamEvent } from '@macaron/shared';
 
@@ -125,6 +134,22 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  // Rename a Codex thread. Codex rollouts don't append custom-title records
+  // the way Claude jsonl does, so we use the engine-agnostic label sidecar
+  // (~/.claude/macaron-labels.json). sessionTitle() reads label before title,
+  // so a labelled thread wins in every sidebar and palette immediately.
+  app.put<{ Params: SidParams; Body: { name?: string } }>(
+    '/api/codex/threads/:sid/label',
+    async ({ params, body }, reply) => {
+      try {
+        const label = await setLabel(params.sid, String(body?.name ?? ''));
+        return { ok: true, label };
+      } catch (e) {
+        return reply.status(400).send({ error: (e as Error).message });
+      }
+    },
+  );
+
   // --- Send / resume -----------------------------------------------------
 
   const pipeCodexToSSE = (
@@ -169,13 +194,27 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
         else if (ev.kind === 'tool_result') relay({ type: 'tool_result', tool_use_id: ev.tool_use_id, text: ev.text, isError: ev.isError });
         else if (ev.kind === 'usage') relay({ type: 'usage', outputTokens: ev.outputTokens, thinkingTokens: ev.thinkingTokens });
         else if (ev.kind === 'codex_plan') relay({ type: 'codex_plan', steps: ev.steps, explanation: ev.explanation });
-        else if (ev.kind === 'codex_approval_request') relay({ type: 'codex_approval_request', id: ev.id, kind: ev.approval, command: ev.command, cwd: ev.cwd, reason: ev.reason, fileChanges: ev.fileChanges, grantRoot: ev.grantRoot, network: ev.network, available: ev.available });
+        else if (ev.kind === 'codex_approval_request') {
+          relay({ type: 'codex_approval_request', id: ev.id, kind: ev.approval, command: ev.command, cwd: ev.cwd, reason: ev.reason, fileChanges: ev.fileChanges, grantRoot: ev.grantRoot, network: ev.network, available: ev.available });
+          // Fan out a push notification too. Subscribed users get a system
+          // notification even with the tab closed — same behaviour as Claude
+          // sessions. Approval kind ('command' / 'file' / 'network') stands in
+          // for the tool name field the push helper expects.
+          if (capturedSid) pushPermissionRequest(CODEX_PUSH_PROJECT, capturedSid, ev.approval);
+        }
         else if (ev.kind === 'codex_approval_resolved') relay({ type: 'codex_approval_resolved', id: ev.id, decision: ev.decision });
         else if (ev.kind === 'message') relay({ type: 'event', event: 'system', subtype: ev.subtype });
         else if (ev.kind === 'error') relay({ type: 'error', error: ev.error });
         else if (ev.kind === 'done') {
           safeSend({ type: 'done', exitCode: ev.exitCode });
-          if (capturedSid) { liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode }); endRun(capturedSid); }
+          if (capturedSid) {
+            liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode });
+            endRun(capturedSid);
+            // Ping the desktop / mobile push subscription that this thread's
+            // turn just wrapped. Matches Claude sessions' 'finished a turn'
+            // toast so users watching two tabs see identical UX.
+            pushSessionDone(CODEX_PUSH_PROJECT, capturedSid);
+          }
           // Name the thread from its opening exchange once the turn's rollout
           // has landed. Fire-and-forget: no-op if already titled, never blocks
           // the response, failures swallowed.

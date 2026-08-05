@@ -14,6 +14,7 @@ import { kimiApi } from './api';
 import { sendKimiMessage, startKimiThread, subscribeKimiLive } from './stream';
 import { KimiComposer } from './KimiComposer';
 import { notify } from '../lib/notify';
+import { cancelAutoSend, createScheduleBridge, type ScheduleBridge } from '../lib/autoSend';
 
 // GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
 // import so the default kimi bundle stays small. First render_ui in a
@@ -310,6 +311,16 @@ export function KimiChat(props: KimiChatProps = {}) {
   // True only after the user kicks off a turn on THIS mount. A server-side
   // reattach also flips `sending`, but must not create a completion notification.
   const streamedRef = useRef(false);
+  // Mirror of `sending` for the countdown bridge, which reads it from a timer
+  // callback that closes over a stale render otherwise.
+  const sendingRef = useRef(false);
+  sendingRef.current = sending;
+  // Latch for the countdown bridge: a turn was started on THIS mount. Distinct
+  // from streamedRef, which the completion effect below clears — a widget that
+  // re-mounts after its turn settles (onDone refetches the thread and swaps
+  // live items for disk history) would otherwise re-arm against a false latch
+  // and silently drop the countdown.
+  const turnStartedRef = useRef(false);
 
   useEffect(() => { onSendingChange?.(sending); }, [sending, onSendingChange]);
 
@@ -418,6 +429,8 @@ export function KimiChat(props: KimiChatProps = {}) {
     if (!programmatic) {
       setPending('');
     }
+    cancelAutoSend(); // a new turn retires the previous widget's countdown
+    turnStartedRef.current = true;
     streamedRef.current = true;
     setSending(true);
     setError('');
@@ -459,20 +472,34 @@ export function KimiChat(props: KimiChatProps = {}) {
   // the shim dispatches to globalThis['$app/chat'], and we relay into
   // submit() as a programmatic user turn. `sendUserMessage` is also bound
   // on globalThis so widgets that forget the import still work.
+  // submit() is re-created on every keystroke (`pending` is a dep), so the
+  // bridge reads it through a ref — re-registering per render would run the
+  // cleanup below and kill an armed countdown before it could tick.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
   useEffect(() => {
     if (!focused) return;
     const g = globalThis as unknown as {
       '$app/chat'?: (prompt: string) => void;
+      '$app/chat/schedule'?: ScheduleBridge;
       sendUserMessage?: (prompt: string) => void;
     };
-    const bridge = (prompt: string) => { void submit({ text: prompt }); };
+    const bridge = (prompt: string) => { void submitRef.current({ text: prompt }); };
     g['$app/chat'] = bridge;
+    g['$app/chat/schedule'] = createScheduleBridge({
+      send: bridge,
+      isBusy: () => sendingRef.current,
+      // Only a turn started on this mount counts, so re-opening a thread
+      // re-mounts its widgets without re-firing an old countdown.
+      isLive: () => turnStartedRef.current,
+    });
     g.sendUserMessage = bridge;
     return () => {
-      if (g['$app/chat'] === bridge) delete g['$app/chat'];
+      if (g['$app/chat'] === bridge) { delete g['$app/chat']; delete g['$app/chat/schedule']; }
       if (g.sendUserMessage === bridge) delete g.sendUserMessage;
+      cancelAutoSend();
     };
-  }, [focused, submit]);
+  }, [focused]);
 
   const title = isNew
     ? 'New thread'

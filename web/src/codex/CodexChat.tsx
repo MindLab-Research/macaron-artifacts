@@ -4,20 +4,23 @@
 // blocks — is tuned to match the claude WebUI's palette (see styles.css).
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Terminal, Pencil, Search, Hexagon, ListTodo, Settings, ChevronDown, ChevronRight, Sparkles, Diamond, CheckSquare, CircleDot, Square, Flag, GitBranch, AlertTriangle } from 'lucide-react';
+import { Terminal, Pencil, Search, Hexagon, ListTodo, Settings, ChevronDown, ChevronRight, Diamond, CheckSquare, CircleDot, Square, Flag, GitBranch, AlertTriangle, Download } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownCode, MarkdownCodeStreamingProvider, MarkdownPre } from '../components/MarkdownCode';
 import type { SessionDetail, Message, Block, CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 import { codexApi } from './api';
-import { basename } from '../lib/api';
+import { basename, downloadTextFile } from '../lib/api';
+import { sessionToMarkdown } from '@macaron/shared';
+import { useToast } from '../components/Toast';
 import type { CodexRuntimeOverride } from './api';
 import { sendCodexMessage, startCodexThread, subscribeCodexLive, type CodexStreamEvent } from './stream';
 import { CodexComposer, type ComposerImage } from './CodexComposer';
 import { notify } from '../lib/notify';
 import { useReplay } from '../components/ReplayControls';
 import { formatDuration } from '../lib/thinkingVerbs';
+import { cancelAutoSend, createScheduleBridge, type ScheduleBridge } from '../lib/autoSend';
 
 // GenuiPreview + its vendored runtime (~500KB gzip) is behind a lazy
 // import so the default codex bundle stays small. First render_ui in a
@@ -252,11 +255,6 @@ function ToolCard({ it }: { it: Extract<Item, { kind: 'tool' }> }) {
 function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   return (
     <div className="cx-genui">
-      <div className="cx-genui-head">
-        <span className="cx-genui-glyph"><Sparkles size={14} aria-hidden="true" /></span>
-        <span className="cx-genui-name">Rendered UI</span>
-        {it.status === 'error' && <span className="cx-genui-status err">diagnostics failed</span>}
-      </div>
       <Suspense fallback={<div className="cx-genui-loading">Loading GenUI runtime…</div>}>
         <GenuiPreview code={it.code} done={!it.streaming} />
       </Suspense>
@@ -392,6 +390,13 @@ export type CodexChatProps = {
   onSendingChange?: (sending: boolean) => void;
   /** Bump this number from the parent to force a fresh transcript reload. */
   refreshKey?: number;
+  /**
+   * When this tile is a draft inside a workspace canvas, the parent passes
+   * `onCreated` to receive the freshly-assigned sid instead of us navigating
+   * to /t/:sid. This is what keeps a new thread inside the current workspace
+   * canvas instead of jumping out to full-screen.
+   */
+  onCreated?: (newSid: string) => void;
 };
 
 export function CodexChat(props: CodexChatProps = {}) {
@@ -403,6 +408,7 @@ export function CodexChat(props: CodexChatProps = {}) {
   const hideBar = props.hideBar ?? false;
   const onSendingChange = props.onSendingChange;
   const refreshKey = props.refreshKey ?? 0;
+  const onCreated = props.onCreated;
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [live, setLive] = useState<Item[]>([]);
   const [pending, setPending] = useState('');
@@ -423,6 +429,16 @@ export function CodexChat(props: CodexChatProps = {}) {
   // True only after the user kicks off a turn on THIS mount. A server-side
   // reattach also flips `sending`, but must not create a completion notification.
   const streamedRef = useRef(false);
+  // Mirror of `sending` for the countdown bridge, which reads it from a timer
+  // callback that closes over a stale render otherwise.
+  const sendingRef = useRef(false);
+  sendingRef.current = sending;
+  // Latch for the countdown bridge: a turn was started on THIS mount. Distinct
+  // from streamedRef, which the completion effect below clears — a widget that
+  // re-mounts after its turn settles (onDone refetches the thread and swaps
+  // live items for disk history) would otherwise re-arm against a false latch
+  // and silently drop the countdown.
+  const turnStartedRef = useRef(false);
 
   useEffect(() => { onSendingChange?.(sending); }, [sending, onSendingChange]);
 
@@ -498,8 +514,20 @@ export function CodexChat(props: CodexChatProps = {}) {
     };
   }, [sid, isNew, refreshKey]);
 
+  const toast = useToast();
   const replay = useReplay(detail?.replayMessages ?? detail?.messages ?? [], isNew || sending);
   const diskHistory = useMemo(() => detail ? historyToItems({ ...detail, messages: replay.messages }) : [], [detail, replay.messages]);
+
+  // Export the current thread as Markdown. sessionToMarkdown lives in
+  // @macaron/shared and takes a SessionDetail — engine-agnostic (both Claude
+  // and Codex populate the same shape). The filename mirrors the Claude side.
+  const exportMarkdown = useCallback(() => {
+    if (!detail) return;
+    const md = sessionToMarkdown(detail);
+    const name = `${basename(detail.cwd) || 'thread'}-${sid.slice(0, 8)}.md`;
+    downloadTextFile(name, md);
+    toast(`Exported ${name}`);
+  }, [detail, sid, toast]);
   const history = useMemo(
     () => reconcileHistoryWithLive(diskHistory, live),
     [diskHistory, live],
@@ -558,6 +586,8 @@ export function CodexChat(props: CodexChatProps = {}) {
       setPending('');
       setImages([]);
     }
+    cancelAutoSend(); // a new turn retires the previous widget's countdown
+    turnStartedRef.current = true;
     streamedRef.current = true;
     setSending(true);
     setError('');
@@ -566,7 +596,14 @@ export function CodexChat(props: CodexChatProps = {}) {
       if (isNew) {
         let newSid = '';
         await startCodexThread({ text, images: wire, runtime: runtimeRef.current }, {
-          onMeta: (s) => { newSid = s; liveSidRef.current = s; },
+          onMeta: (s) => {
+            newSid = s;
+            liveSidRef.current = s;
+            // Embedded in a workspace canvas: swap the draft tile in place
+            // right away so the parent's tile remounts with the real sid
+            // (and keeps streaming) — no full-screen navigation.
+            if (onCreated) onCreated(s);
+          },
           onDelta: appendAssistantDelta,
           onReasoning: appendReasoning,
           onToolUse: (ev) => appendTool(ev.id, ev.name, ev.input),
@@ -577,7 +614,7 @@ export function CodexChat(props: CodexChatProps = {}) {
           onError: (m) => setError(m),
           onDone: () => {
             setSending(false);
-            if (newSid) navigate(`/t/${encodeURIComponent(newSid)}`, { replace: true });
+            if (newSid && !onCreated) navigate(`/t/${encodeURIComponent(newSid)}`, { replace: true });
           },
         });
       } else {
@@ -607,20 +644,34 @@ export function CodexChat(props: CodexChatProps = {}) {
   // the shim dispatches to globalThis['$app/chat'], and we relay into
   // submit() as a programmatic user turn. `sendUserMessage` is also bound
   // on globalThis so widgets that forget the import still work.
+  // submit() is re-created on every keystroke (`pending` is a dep), so the
+  // bridge reads it through a ref — re-registering per render would run the
+  // cleanup below and kill an armed countdown before it could tick.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
   useEffect(() => {
     if (!focused) return;
     const g = globalThis as unknown as {
       '$app/chat'?: (prompt: string) => void;
+      '$app/chat/schedule'?: ScheduleBridge;
       sendUserMessage?: (prompt: string) => void;
     };
-    const bridge = (prompt: string) => { void submit({ text: prompt }); };
+    const bridge = (prompt: string) => { void submitRef.current({ text: prompt }); };
     g['$app/chat'] = bridge;
+    g['$app/chat/schedule'] = createScheduleBridge({
+      send: bridge,
+      isBusy: () => sendingRef.current,
+      // Only a turn started on this mount counts, so re-opening a thread
+      // re-mounts its widgets without re-firing an old countdown.
+      isLive: () => turnStartedRef.current,
+    });
     g.sendUserMessage = bridge;
     return () => {
-      if (g['$app/chat'] === bridge) delete g['$app/chat'];
+      if (g['$app/chat'] === bridge) { delete g['$app/chat']; delete g['$app/chat/schedule']; }
       if (g.sendUserMessage === bridge) delete g.sendUserMessage;
+      cancelAutoSend();
     };
-  }, [focused, submit]);
+  }, [focused]);
 
   const title = isNew
     ? 'New thread'
@@ -642,6 +693,16 @@ export function CodexChat(props: CodexChatProps = {}) {
                   <span className="cx-main-head-branch"><GitBranch size={13} aria-hidden="true" /> {detail.gitBranch}</span>
                 </>
               )}
+              <button
+                type="button"
+                className="cx-main-head-action"
+                onClick={exportMarkdown}
+                title="Download this thread as Markdown"
+                aria-label="Download this thread as Markdown"
+                disabled={!detail}
+              >
+                <Download size={13} aria-hidden="true" />
+              </button>
             </>
           )}
         </div>
