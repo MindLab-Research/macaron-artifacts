@@ -1,7 +1,7 @@
 {
   "name": "mcc",
   "version": "0.1.0",
-  "description": "Macaron Claude Code WebUI — GenUI tooling and plugin manifests. Self-contained launcher, prebuilt server + web bundles.",
+  "description": "Macaron Artifacts WebUI — GenUI tooling and plugin manifests. Self-contained launcher, prebuilt server + web bundles.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,magenta \"pnpm --filter @macaron/server dev\" \"pnpm --filter @macaron/web dev\"",

@@ -49,6 +49,7 @@ import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/Confirm';
 import { AuthGate } from './components/AuthGate';
 import { consumeHandoff } from './lib/auth';
+import { initTelemetry, track, trackRoutes } from './lib/telemetry';
 import { preloadRendererRuntime } from './macaron-vendor/StaticGenUIRenderer';
 import { registerServiceWorker } from './lib/pwa';
 import './styles.css';
@@ -59,6 +60,10 @@ import './chat-code.css';
 // nothing secret is read from the URL, so a crafted ?server= link can't point us
 // at an attacker and no token ever rides the query string.
 consumeHandoff();
+
+// Telemetry is opt-in (server-side MACARON_TELEMETRY=1); this is a no-op otherwise.
+void initTelemetry();
+track('app_mounted', { engine: 'claude' });
 
 // The server serves the SPA for direct deep links, while createHashRouter reads
 // only the hash. Promote a pathname route before the router initializes so
@@ -133,6 +138,8 @@ const router = createHashRouter([
   // the sidebar/composer chrome. Reuses the same GenUI boot below.
   { path: 'share/:token', element: <ShareView /> },
 ]);
+
+trackRoutes(router);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

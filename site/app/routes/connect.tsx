@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react';
 import { baseOptions } from '@/lib/layout.shared';
 import { submit, onRestore } from '@/lib/connect-state';
 import { HANDOFF_KEY, type Engine } from '@/lib/hosted-target';
+import { track } from '@/lib/telemetry';
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -35,6 +36,7 @@ export default function Connect() {
     setUrl(state.url);
     setToken(state.token);
     setError(state.error);
+    track('connect_submit', { engine, ok: !!navigate, hasToken: !!token });
     if (navigate && handoff) {
       // Stash the {server, token} in sessionStorage (same tab, same origin) and
       // open the clean hosted route — the credential never rides the URL, so it
@@ -60,7 +62,7 @@ export default function Connect() {
               <button
                 key={e}
                 type="button"
-                onClick={() => setEngine(e)}
+                onClick={() => { setEngine(e); track('tab_switch', { group: 'connect-engine', value: e }); }}
                 className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${engine === e ? 'border-fd-primary bg-fd-primary/10 text-fd-primary' : 'border-fd-border text-fd-muted-foreground hovered:bg-fd-accent'}`}
               >
                 {e === 'claude' ? 'Claude Code' : e === 'codex' ? 'Codex' : 'Kimi Code'}

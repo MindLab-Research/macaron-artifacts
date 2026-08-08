@@ -256,7 +256,7 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
   return (
     <div className="cx-genui">
       <Suspense fallback={<div className="cx-genui-loading">Loading GenUI runtime…</div>}>
-        <GenuiPreview code={it.code} done={!it.streaming} />
+        <GenuiPreview code={it.code} done={!it.streaming} engine="codex" widgetId={it.id} />
       </Suspense>
       {it.status === 'error' && it.error && (
         <details className="cx-genui-details">

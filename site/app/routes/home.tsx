@@ -11,10 +11,11 @@ import ClaudeCode from '@lobehub/icons/es/ClaudeCode/components/Mono';
 import Codex from '@lobehub/icons/es/Codex/components/Mono';
 import Kimi from '@lobehub/icons/es/Kimi/components/Mono';
 import { baseOptions } from '@/lib/layout.shared';
+import { track, type SiteEvents } from '@/lib/telemetry';
 import ChatShowcase from '@/components/chat-showcase';
 
-function CommandCopyButton({ code }: { code: string }) {
-  const [checked, onClick] = useCopyButton(() => navigator.clipboard.writeText(code));
+function CommandCopyButton({ code, on }: { code: string; on: SiteEvents['command_copy'] }) {
+  const [checked, onClick] = useCopyButton(() => { navigator.clipboard.writeText(code); track('command_copy', on); });
 
   return (
     <button
@@ -30,7 +31,7 @@ function CommandCopyButton({ code }: { code: string }) {
 }
 
 // Keep the Fumadocs highlighting while binding each copy action directly to its command.
-function Command({ code }: { code: string }) {
+function Command({ code, on }: { code: string; on: SiteEvents['command_copy'] }) {
   return (
     <DynamicCodeBlock
       lang="bash"
@@ -39,7 +40,7 @@ function Command({ code }: { code: string }) {
         allowCopy: false,
         Actions: ({ className }) => (
           <div className={className}>
-            <CommandCopyButton code={code} />
+            <CommandCopyButton code={code} on={on} />
           </div>
         ),
       }}
@@ -76,18 +77,21 @@ export default function Home() {
             <Link
               className="text-sm bg-fd-primary text-fd-primary-foreground rounded-full font-medium px-5 py-2.5 transition-opacity hovered:opacity-90"
               to="/docs"
+              onClick={() => track('cta_click', { target: 'docs', section: 'hero' })}
             >
               Read the Docs
             </Link>
             <Link
               className="text-sm border rounded-full font-medium px-5 py-2.5 transition-colors hovered:bg-fd-accent hovered:text-fd-accent-foreground"
               to="/docs/usage"
+              onClick={() => track('cta_click', { target: 'quick-start', section: 'hero' })}
             >
               Quick Start
             </Link>
             <Link
               className="text-sm border rounded-full font-medium px-5 py-2.5 transition-colors hovered:bg-fd-accent hovered:text-fd-accent-foreground"
               to="/connect"
+              onClick={() => track('cta_click', { target: 'connect', section: 'hero' })}
             >
               Connect a Server
             </Link>
@@ -109,13 +113,13 @@ export default function Home() {
           <div className="mb-4 text-sm font-medium text-fd-muted-foreground">Plugin Marketplace</div>
           <Tabs defaultValue="claude-code">
             <TabsList>
-              <TabsTrigger value="claude-code" className="gap-2">
+              <TabsTrigger value="claude-code" className="gap-2" onClick={() => track('tab_switch', { group: 'engine', value: 'claude-code' })}>
                 <ClaudeCode size={16} /> Claude Code
               </TabsTrigger>
-              <TabsTrigger value="codex" className="gap-2">
+              <TabsTrigger value="codex" className="gap-2" onClick={() => track('tab_switch', { group: 'engine', value: 'codex' })}>
                 <Codex size={16} /> Codex
               </TabsTrigger>
-              <TabsTrigger value="kimi-code" className="gap-2">
+              <TabsTrigger value="kimi-code" className="gap-2" onClick={() => track('tab_switch', { group: 'engine', value: 'kimi-code' })}>
                 <Kimi size={16} /> Kimi Code
               </TabsTrigger>
             </TabsList>
@@ -123,15 +127,15 @@ export default function Home() {
               <Steps>
                 <Step>
                   <p className="font-medium">Add the Marketplace Source</p>
-                  <Command code="claude plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
+                  <Command code="claude plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" on={{ engine: 'claude', kind: 'plugin' }} />
                 </Step>
                 <Step>
                   <p className="font-medium">Install the Plugin</p>
-                  <Command code="claude plugin install macaron@macaron" />
+                  <Command code="claude plugin install macaron@macaron" on={{ engine: 'claude', kind: 'plugin' }} />
                 </Step>
                 <Step>
                   <p className="font-medium">Run It and Open the WebUI</p>
-                  <Command code="/macaron" />
+                  <Command code="/macaron" on={{ engine: 'claude', kind: 'run' }} />
                   <p className="text-sm text-fd-muted-foreground">
                     Run it in a session — the WebUI opens on{' '}
                     <a className="text-fd-foreground underline underline-offset-4" href="http://localhost:7878">http://localhost:7878</a>.
@@ -143,11 +147,11 @@ export default function Home() {
               <Steps>
                 <Step>
                   <p className="font-medium">Add the Marketplace Source</p>
-                  <Command code="codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" />
+                  <Command code="codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts" on={{ engine: 'codex', kind: 'plugin' }} />
                 </Step>
                 <Step>
                   <p className="font-medium">Add the Plugin</p>
-                  <Command code="codex plugin add macaron@macaron" />
+                  <Command code="codex plugin add macaron@macaron" on={{ engine: 'codex', kind: 'plugin' }} />
                 </Step>
                 <Step>
                   <p className="font-medium">Run It and Open the WebUI</p>
@@ -162,14 +166,14 @@ export default function Home() {
               <Steps>
                 <Step>
                   <p className="font-medium">Install from GitHub</p>
-                  <Command code="/plugins install https://github.com/MindLab-Research/macaron-artifacts" />
+                  <Command code="/plugins install https://github.com/MindLab-Research/macaron-artifacts" on={{ engine: 'kimi', kind: 'plugin' }} />
                   <p className="text-sm text-fd-muted-foreground">
                     Run it in a Kimi Code session, then <code className="text-fd-foreground">/reload</code> to activate.
                   </p>
                 </Step>
                 <Step>
                   <p className="font-medium">Run It and Open the WebUI</p>
-                  <Command code="/macaron:macaron" />
+                  <Command code="/macaron:macaron" on={{ engine: 'kimi', kind: 'run' }} />
                   <p className="text-sm text-fd-muted-foreground">
                     The WebUI opens on{' '}
                     <a className="text-fd-foreground underline underline-offset-4" href="http://localhost:7980">http://localhost:7980</a>.
@@ -187,26 +191,31 @@ export default function Home() {
             <code className="text-fd-foreground">mkx</code> (Kimi, port 7980). The commands are pinned to this
             build's commit; swap in any other commit on <code className="text-fd-foreground">main</code> to pull that build.
           </p>
-          <Tabs items={['bun', 'npm']}>
+          <Tabs defaultValue="bun">
+            <TabsList>
+              {['bun', 'npm'].map((v) => (
+                <TabsTrigger key={v} value={v} onClick={() => track('tab_switch', { group: 'pm', value: v })}>{v}</TabsTrigger>
+              ))}
+            </TabsList>
             <Tab value="bun">
               <div className="flex flex-col gap-3">
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
                     <ClaudeCode size={15} /> Claude — <code className="text-fd-muted-foreground">mcc</code>
                   </div>
-                  <Command code={`bunx mcc@${PKG}`} />
+                  <Command code={`bunx mcc@${PKG}`} on={{ engine: 'claude', kind: 'bunx' }} />
                 </div>
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
                     <Codex size={15} /> Codex — <code className="text-fd-muted-foreground">mcx</code>
                   </div>
-                  <Command code={`bunx mcx@${PKG_MCX}`} />
+                  <Command code={`bunx mcx@${PKG_MCX}`} on={{ engine: 'codex', kind: 'bunx' }} />
                 </div>
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
                     <Kimi size={15} /> Kimi — <code className="text-fd-muted-foreground">mkx</code>
                   </div>
-                  <Command code={`bunx mkx@${PKG_MKX}`} />
+                  <Command code={`bunx mkx@${PKG_MKX}`} on={{ engine: 'kimi', kind: 'bunx' }} />
                 </div>
               </div>
             </Tab>
@@ -216,19 +225,19 @@ export default function Home() {
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
                     <ClaudeCode size={15} /> Claude — <code className="text-fd-muted-foreground">mcc</code>
                   </div>
-                  <Command code={`npx mcc@${PKG}`} />
+                  <Command code={`npx mcc@${PKG}`} on={{ engine: 'claude', kind: 'npx' }} />
                 </div>
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
                     <Codex size={15} /> Codex — <code className="text-fd-muted-foreground">mcx</code>
                   </div>
-                  <Command code={`npx mcx@${PKG_MCX}`} />
+                  <Command code={`npx mcx@${PKG_MCX}`} on={{ engine: 'codex', kind: 'npx' }} />
                 </div>
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
                     <Kimi size={15} /> Kimi — <code className="text-fd-muted-foreground">mkx</code>
                   </div>
-                  <Command code={`npx mkx@${PKG_MKX}`} />
+                  <Command code={`npx mkx@${PKG_MKX}`} on={{ engine: 'kimi', kind: 'npx' }} />
                 </div>
               </div>
             </Tab>
@@ -241,13 +250,13 @@ export default function Home() {
             <p className="text-fd-muted-foreground">Drive Macaron sessions from the browser and watch every turn as it happens.</p>
           </div>
           <Cards className="grid-cols-1 sm:grid-cols-3">
-            <Card icon={<MonitorPlay />} title="Visual Sessions" href="/docs/usage">
+            <Card icon={<MonitorPlay />} title="Visual Sessions" href="/docs/usage" onClick={() => track('cta_click', { target: 'visual-sessions', section: 'run-with-ui' })}>
               Browse workspaces and sessions with previews, then continue a turn from the browser.
             </Card>
-            <Card icon={<MessagesSquare />} title="Live Chat" href="/docs/usage">
+            <Card icon={<MessagesSquare />} title="Live Chat" href="/docs/usage" onClick={() => track('cta_click', { target: 'live-chat', section: 'run-with-ui' })}>
               Stream thinking, tool calls, and GenUI previews from supported agent runtimes.
             </Card>
-            <Card icon={<SlidersHorizontal />} title="Provider Controls" href="/docs/usage">
+            <Card icon={<SlidersHorizontal />} title="Provider Controls" href="/docs/usage" onClick={() => track('cta_click', { target: 'provider-controls', section: 'run-with-ui' })}>
               Run against an ambient login or a compatible endpoint such as Macaron, OpenRouter, or LiteLLM.
             </Card>
           </Cards>
@@ -257,10 +266,10 @@ export default function Home() {
             <p className="text-fd-muted-foreground">GenUI tooling and plugin manifests that plug into your existing agent setup.</p>
           </div>
           <Cards>
-            <Card icon={<Wand2 />} title="genui-builder Skill" href="/docs/usage">
+            <Card icon={<Wand2 />} title="genui-builder Skill" href="/docs/usage" onClick={() => track('cta_click', { target: 'genui-builder', section: 'extend' })}>
               The bundled skill lets supported agents produce GenUI TSX from the command line.
             </Card>
-            <Card icon={<Puzzle />} title="Plugin Manifests" href="/docs">
+            <Card icon={<Puzzle />} title="Plugin Manifests" href="/docs" onClick={() => track('cta_click', { target: 'plugin-manifests', section: 'extend' })}>
               Ship the manifests that register Macaron Artifacts with Claude Code, Codex, and Kimi Code.
             </Card>
           </Cards>

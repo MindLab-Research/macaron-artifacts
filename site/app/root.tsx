@@ -10,6 +10,7 @@ import { RootProvider } from 'fumadocs-ui/provider/react-router';
 import type { Route } from './+types/root';
 import './app.css';
 import SearchDialog from '@/components/search';
+import { trackerProps } from '@/lib/telemetry';
 import NotFound from './routes/not-found';
 
 export const links: Route.LinksFunction = () => [
@@ -33,6 +34,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <script defer {...trackerProps} />
       </head>
       <body className="flex flex-col min-h-screen">
         <RootProvider search={{ SearchDialog }}>{children}</RootProvider>

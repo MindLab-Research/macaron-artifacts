@@ -13,6 +13,7 @@ import { AuthGate } from '../components/AuthGate';
 import { ToastProvider } from '../components/Toast';
 import { ConfirmProvider } from '../components/Confirm';
 import { consumeHandoff } from '../lib/auth';
+import { initTelemetry, track, trackRoutes } from '../lib/telemetry';
 import { registerServiceWorker } from '../lib/pwa';
 import './styles.css';
 import '../chat-code.css';
@@ -21,6 +22,10 @@ import '../chat-code.css';
 // same-tab in sessionStorage). The handoff binds the token to its server origin;
 // nothing secret rides the URL.
 consumeHandoff();
+
+// Telemetry is opt-in (server-side MACARON_TELEMETRY=1); this is a no-op otherwise.
+void initTelemetry();
+track('app_mounted', { engine: 'kimi' });
 
 const router = createHashRouter([
   {
@@ -35,6 +40,8 @@ const router = createHashRouter([
     ],
   },
 ]);
+
+trackRoutes(router);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

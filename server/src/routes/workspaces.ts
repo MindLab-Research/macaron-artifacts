@@ -18,6 +18,7 @@ import path from 'node:path';
 import { CLAUDE_PROJECTS } from '../config.js';
 import { pushPermissionRequest, pushSessionDone } from '../lib/push-notify.js';
 import { createWorktree, bindWorktree, cleanupPendingWorktree, type PendingWorktree } from '../lib/worktree-store.js';
+import { track } from '../lib/telemetry.js';
 
 type Params = { project: string };
 type NewSessionBody = {
@@ -262,6 +263,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
       const abortController = new AbortController();
       const startedAt = Date.now();
       const stream = runClaude({ prompt: text, cwd, model, permissionMode, images, envOverrides: providerEnv, abortController });
+      track('run_started', { engine: 'claude', resumed: false, hasImages: images.length > 0, promptLen: text.length });
 
       let clientGone = false;
       reply.raw.on('close', () => {
@@ -329,6 +331,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
             safeSend({ type: 'error', error: ev.error });
             if (capturedSid) livePush(capturedSid, { type: 'error', error: ev.error });
           } else if (ev.kind === 'done') {
+            track('run_finished', { engine: 'claude', durationMs: Date.now() - startedAt, ok: ev.exitCode === 0 });
             safeSend({ type: 'done', exitCode: ev.exitCode });
             if (capturedSid) {
               liveEnd(capturedSid, { type: 'done', exitCode: ev.exitCode });
@@ -358,6 +361,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance): Promise<voi
         if (pendingWt && !capturedSid) await cleanupPendingWorktree(pendingWt);
       })().catch((e: unknown) => {
         const msg = (e as Error).message;
+        track('run_finished', { engine: 'claude', durationMs: Date.now() - startedAt, ok: false });
         safeSend({ type: 'error', error: msg });
         if (pendingWt && !capturedSid) cleanupPendingWorktree(pendingWt).catch(() => {});
         if (capturedSid) {

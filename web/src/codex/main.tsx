@@ -13,6 +13,7 @@ import { AuthGate } from '../components/AuthGate';
 import { ToastProvider } from '../components/Toast';
 import { ConfirmProvider } from '../components/Confirm';
 import { consumeHandoff } from '../lib/auth';
+import { initTelemetry, track, trackRoutes } from '../lib/telemetry';
 import { registerServiceWorker } from '../lib/pwa';
 // Engine-agnostic pages (user-scope APIs) reused from the Claude bundle so
 // Codex users get the same management surface without a parallel rewrite.
@@ -41,6 +42,10 @@ import '../styles.css';
 // nothing secret rides the URL.
 consumeHandoff();
 
+// Telemetry is opt-in (server-side MACARON_TELEMETRY=1); this is a no-op otherwise.
+void initTelemetry();
+track('app_mounted', { engine: 'codex' });
+
 const router = createHashRouter([
   {
     path: '/',
@@ -68,6 +73,8 @@ const router = createHashRouter([
     ],
   },
 ]);
+
+trackRoutes(router);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

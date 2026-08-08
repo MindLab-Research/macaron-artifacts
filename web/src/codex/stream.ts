@@ -2,6 +2,7 @@
 // into typed events the chat view can consume with simple callbacks.
 
 import { authedFetch } from '../lib/auth';
+import { track } from '../lib/telemetry';
 import type { CodexPlanStatus, CodexApprovalKind, CodexDecision } from '@macaron/shared';
 import type { CodexRuntimeOverride } from './api';
 
@@ -45,6 +46,7 @@ async function pump(resp: Response, h: CodexStreamHandlers): Promise<void> {
   if (!resp.ok || !resp.body) {
     const txt = await resp.text().catch(() => '');
     h.onError?.(`http ${resp.status}: ${txt.slice(0, 200)}`);
+    h.onDone?.(-1); // so callers waiting on onDone (setSending(false)) don't hang
     return;
   }
   const reader = resp.body.getReader();
@@ -109,8 +111,21 @@ export async function sendCodexMessage(sid: string, body: Body, h: CodexStreamHa
 // thread after a refresh reconstructs the same live UI as the original POST.
 export function subscribeCodexLive(sid: string, h: CodexStreamHandlers): () => void {
   const ac = new AbortController();
+  const openedAt = performance.now();
   authedFetch(`/api/codex/threads/${encodeURIComponent(sid)}/live`, { signal: ac.signal })
-    .then((resp) => pump(resp, h))
-    .catch(() => { /* aborted or disconnected; a remount replays the snapshot */ });
+    .then((resp) => {
+      // An HTTP-level failure never throws, so without this the only losses we'd
+      // ever see are fetch-level ones — a 401 or a dead proxy would look like a
+      // healthy stream.
+      if (!resp.ok) track('stream_disconnected', { engine: 'codex', durationMs: Math.round(performance.now() - openedAt) });
+      return pump(resp, h);
+    })
+    .catch(() => {
+      // A disconnect worth counting. An abort is just the user navigating away —
+      // skipping it is also what keeps this comparable with claude, whose live
+      // attach has no AbortController at all.
+      if (ac.signal.aborted) return;
+      track('stream_disconnected', { engine: 'codex', durationMs: Math.round(performance.now() - openedAt) });
+    });
   return () => ac.abort();
 }

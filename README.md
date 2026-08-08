@@ -136,6 +136,16 @@ MACARON_HOST=0.0.0.0 MACARON_AUTH_TOKEN=your-long-random-token /macaron
 
 Remote requests must then present the token; localhost stays frictionless (loopback is never challenged). The web app shows a one-field unlock screen, and you can share a ready-to-use link as `http://<host>:7878/?token=your-long-random-token` (the token is stored and stripped from the URL on first load). If you bind to a non-loopback host **without** setting a token, the server generates one at boot and prints it to the log so it's never left wide open.
 
+### Telemetry
+
+macaron reports anonymous usage to our own [umami](https://umami.is) instance so we can see which engines and features actually get used. Almost everything sent is a counter or a duration — route patterns, engine name, status codes, code lengths. Prompts, transcripts, and tokens are never sent. The one free-text field is the message of a failed UI render, which is truncated to 200 characters and stripped of URLs, e-mail addresses, API keys, and filesystem paths before it leaves the machine. The browser's Do Not Track setting is honoured.
+
+To opt out completely, so the tracker script is never injected and the server makes zero outbound requests:
+
+```bash
+MACARON_TELEMETRY=0
+```
+
 ## Layout
 
 ```

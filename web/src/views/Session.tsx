@@ -53,6 +53,7 @@ import { loadHistory, pushHistory } from '../lib/history';
 import { ensureNotificationPermission, notify } from '../lib/notify';
 import { playSound } from '../lib/sound';
 import StaticGenUIRenderer from '../macaron-vendor/StaticGenUIRenderer';
+import { track, trackFailedOnce, trackRenderedOnce } from '../lib/telemetry';
 import { CreatePrDialog } from '../components/CreatePrDialog';
 import { collapseReadSearchGroups, summarize } from '../lib/collapseReadSearch';
 
@@ -788,13 +789,15 @@ function GenuiItem({ it, superseded = false }: { it: Extract<Item, { kind: 'genu
   const toast = useToast();
 
   const onRendered = useCallback((rendered: string) => {
+    trackRenderedOnce(it.toolUseId, 'claude');
     setLastGoodCode(rendered);
     setHasRendered(true);
-  }, []);
+  }, [it.toolUseId]);
   // onError is a no-op now — we don't surface runtime errors as banners
   // anymore; StaticGenUIRenderer's own crossfade keeps the last good frame
   // and a later retry (which we let through the filter above) is the fix.
-  const onError = useCallback(() => { /* swallow */ }, []);
+  // It's still the funnel's failure signal, so it reports.
+  const onError = useCallback((err: Error, phase: string) => { if (!streaming) trackFailedOnce(it.toolUseId, 'claude', phase, err.message); }, [streaming, it.toolUseId]);
 
   const displayCode = code || lastGoodCode;
   const onExport = useCallback(async () => {

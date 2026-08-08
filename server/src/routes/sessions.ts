@@ -20,6 +20,7 @@ import { liveGet, liveStart, livePush, liveEnd } from '../lib/live-registry.js';
 import { runClaude, runFollowup, type AttachedImage, type RunOptions, type RunnerEvent } from '../lib/claude-runner.js';
 import { getActiveProviderEnv, getActiveProviderRaw, getFollowupSuggestionsEnabled } from '../lib/settings-store.js';
 import { claimRun, abortRun, endRun } from '../lib/active-runs.js';
+import { track } from '../lib/telemetry.js';
 import { resolvePending } from '../lib/permission-registry.js';
 import { pushPermissionRequest, pushSessionDone } from '../lib/push-notify.js';
 import { listSlashCommands } from '../lib/slash-commands.js';
@@ -390,6 +391,8 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
       let sseStarted = false;
       let liveStarted = false;
       let terminalSent = false;
+      const runStartedAt = performance.now();
+      track('run_started', { engine: 'claude', resumed: true, hasImages: images.length > 0, promptLen: text.length });
       reply.raw.on('close', () => { clientGone = true; });
       const safeSend = (payload: Parameters<typeof sseSend>[1]) => {
         if (!sseStarted || clientGone) return;
@@ -399,6 +402,7 @@ export async function registerSessionRoutes(app: FastifyInstance, options: Sessi
       const finishMainRun = (exitCode: number, error?: string) => {
         if (terminalSent) return;
         terminalSent = true;
+        track('run_finished', { engine: 'claude', durationMs: Math.round(performance.now() - runStartedAt), ok: exitCode === 0 && !error });
         if (error) {
           safeSend({ type: 'error', error });
           if (liveStarted) livePush(sid, { type: 'error', error });

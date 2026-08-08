@@ -31,6 +31,7 @@ import {
 import { startSSE, sseSend, sseDone } from '../lib/sse.js';
 import { liveStart, livePush, liveEnd, liveGet } from '../lib/live-registry.js';
 import { registerRun, claimRun, abortRun, endRun } from '../lib/active-runs.js';
+import { track } from '../lib/telemetry.js';
 import type { AttachedImage } from '../lib/claude-runner.js';
 import type { SessionStreamEvent } from '@macaron/shared';
 
@@ -106,6 +107,8 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
     live: { cwd: string; text: string; hasImages: boolean },
   ) => {
     let clientGone = false;
+    const startedAt = performance.now();
+    track('run_started', { engine: 'kimi', resumed: sid !== null, hasImages: live.hasImages, promptLen: live.text.length });
     reply.raw.on('close', () => { clientGone = true; });
     const safeSend = (payload: Parameters<typeof sseSend>[1]) => {
       if (clientGone) return;
@@ -133,6 +136,7 @@ export async function registerKimiRoutes(app: FastifyInstance, options: KimiRout
     const finishRun = (exitCode: number, error?: string) => {
       if (terminalSent) return;
       terminalSent = true;
+      track('run_finished', { engine: 'kimi', durationMs: Math.round(performance.now() - startedAt), ok: exitCode === 0 });
       if (error) safeSend({ type: 'error', error });
       const done = { type: 'done' as const, exitCode, ...(error ? { error } : {}) };
       safeSend(done);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// mcc — Macaron Claude Code WebUI launcher. Starts the prebuilt server and
+// mcc — Macaron Artifacts WebUI launcher. Starts the prebuilt server and
 // serves the bundled web UI. The server bundle (bun build --packages=external)
 // leaves every npm dep external; @macaron/shared is types-only, so its
 // `import type` usages erase at compile time and it never reaches the bundler.
@@ -14,7 +14,7 @@ const args = process.argv.slice(2);
 function printHelp() {
   console.log(`Usage: mcc [options]
 
-  Start the Macaron Claude Code WebUI.
+  Start the Macaron Artifacts WebUI.
 
 Options:
   --host <host>          Bind address (default: 127.0.0.1)

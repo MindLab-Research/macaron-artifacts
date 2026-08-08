@@ -10,6 +10,7 @@
 import type { Message } from '@macaron/shared';
 import { extractPartialCode } from './partialJson';
 import { authedFetch } from './auth';
+import { track } from './telemetry';
 
 // A single item on the timeline. Text chunks and tool calls are stored in
 // one ordered list so the UI renders them in the exact interleaved order
@@ -674,6 +675,7 @@ export function attachLive(project: string, sid: string): Promise<AttachResult> 
     settleReady(result);
   };
   liveAttachments.set(sid, attachment);
+  const attachedAt = performance.now();
 
   void (async () => {
     let seenAnyEvent = false;
@@ -683,6 +685,7 @@ export function attachLive(project: string, sid: string): Promise<AttachResult> 
         headers: { Accept: 'text/event-stream' },
       });
       if (!resp.ok || !resp.body) {
+        track('stream_disconnected', { engine: 'claude', durationMs: Math.round(performance.now() - attachedAt) });
         settle('not-live');
         return;
       }
@@ -743,6 +746,9 @@ export function attachLive(project: string, sid: string): Promise<AttachResult> 
       const current = states.get(sid);
       if (current && !current.done) { current.done = true; notify(sid); }
     } catch {
+      // Only an abnormal end is worth an event — a stream that ends because the
+      // turn finished falls out of the try block and is covered by run_finished.
+      track('stream_disconnected', { engine: 'claude', durationMs: Math.round(performance.now() - attachedAt) });
       settle('not-live');
       const current = states.get(sid);
       if (current && !current.done) { current.done = true; notify(sid); }

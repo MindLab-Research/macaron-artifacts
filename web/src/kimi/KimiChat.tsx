@@ -223,7 +223,7 @@ function GenuiCard({ it }: { it: Extract<Item, { kind: 'genui' }> }) {
         {it.status === 'error' && <span className="kx-genui-status err">diagnostics failed</span>}
       </div>
       <Suspense fallback={<div className="kx-genui-loading">Loading GenUI runtime…</div>}>
-        <GenuiPreview code={it.code} done />
+        <GenuiPreview code={it.code} done engine="kimi" widgetId={it.id} />
       </Suspense>
       {it.status === 'error' && it.error && (
         <details className="kx-genui-details">
