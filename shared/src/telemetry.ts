@@ -55,5 +55,5 @@ export function redactMessage(msg: string): string {
     .slice(0, 200);
 }
 
-/** What GET /api/telemetry answers. Empty host/websiteId when disabled. */
-export type TelemetryConfig = { enabled: boolean; host: string; websiteId: string; scriptPath: string };
+/** What GET /api/telemetry answers. Empty host/websiteId/installId when disabled. */
+export type TelemetryConfig = { enabled: boolean; host: string; websiteId: string; scriptPath: string; installId: string };

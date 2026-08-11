@@ -6,6 +6,7 @@
 // at-most-once: one attempt per batch, failures are dropped silently.
 
 import type { AnalyticsEvents } from '@macaron/shared';
+import { INSTALL_ID } from './install-id.js';
 
 // Our self-hosted umami instance. Hard-coded rather than env-driven: the site is
 // ours and never changes per install, so an unset variable should not silently
@@ -17,7 +18,7 @@ const SCRIPT_PATH = '/u.js';
 
 const active = !/^(0|false|no|off)$/i.test(process.env.MACARON_TELEMETRY || '');
 
-export const telemetryConfig = { enabled: active, host: active ? HOST : '', websiteId: active ? WEBSITE_ID : '', scriptPath: SCRIPT_PATH };
+export const telemetryConfig = { enabled: active, host: active ? HOST : '', websiteId: active ? WEBSITE_ID : '', scriptPath: SCRIPT_PATH, installId: active ? INSTALL_ID : '' };
 
 type Pending = { name: string; data: Record<string, unknown> };
 const queue: Pending[] = [];
@@ -59,7 +60,7 @@ export function track<K extends keyof AnalyticsEvents>(name: K, data: AnalyticsE
   const payload: Record<string, unknown> = 'message' in data
     ? { ...data, message: data.message.replace(/\b[a-z]+:\/\/\S+/gi, '<url>').replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, '<email>').replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{8,}/g, '<key>').replace(/(?:[A-Za-z]:)?(?<![\w])[\\/](?:[\w.-]+[\\/])+[\w.-]+/g, '<path>').slice(0, 200) }
     : { ...data };
-  queue.push({ name, data: payload });
+  queue.push({ name, data: { ...payload, installId: INSTALL_ID } });
   if (queue.length >= FLUSH_AT_COUNT) return flush();
   timer ||= setTimeout(flush, FLUSH_AFTER_MS).unref();
 }

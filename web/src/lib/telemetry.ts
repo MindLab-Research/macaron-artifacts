@@ -12,6 +12,10 @@ import { authedFetch } from './auth';
 type Loaded = { track: (name: string, data?: Record<string, unknown>) => void };
 
 let umami: Loaded | null = null;
+// Stamped onto every event so client and server rows join on one install. Known
+// only after /api/telemetry answers — which is also when anything can be sent,
+// so the queue below never flushes without it.
+let installId = '';
 const queue: Array<[AnalyticsEventName, Record<string, unknown>]> = [];
 
 export function track<K extends AnalyticsEventName>(name: K, data: AnalyticsEvents[K]): void {
@@ -19,7 +23,7 @@ export function track<K extends AnalyticsEventName>(name: K, data: AnalyticsEven
   // narrowing is structural, so an event without a message is untouched.
   const payload: Record<string, unknown> = 'message' in data ? { ...data, message: redactMessage(data.message) } : { ...data };
   if (!umami) { if (queue.length < 100) queue.push([name, payload]); return; }
-  umami.track(name, payload);
+  umami.track(name, { ...payload, installId });
 }
 
 // The renderer re-fires onRendered/onError for every streamed frame, and a
@@ -61,6 +65,7 @@ export async function initTelemetry(): Promise<void> {
     cfg = (await r.json()) as TelemetryConfig;
   } catch { return; }
   if (!cfg.enabled) { queue.length = 0; return; }
+  installId = cfg.installId;
 
   const el = document.createElement('script');
   el.async = true;
@@ -82,7 +87,7 @@ export async function initTelemetry(): Promise<void> {
   el.addEventListener('load', () => {
     umami = (window as unknown as { umami?: Loaded }).umami ?? null;
     if (!umami) return;
-    for (const [name, data] of queue.splice(0, queue.length)) umami.track(name, data);
+    for (const [name, data] of queue.splice(0, queue.length)) umami.track(name, { ...data, installId });
   });
   document.head.appendChild(el);
 }
