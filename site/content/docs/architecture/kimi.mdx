@@ -3,6 +3,10 @@ title: Kimi Variant
 description: How the same server binary boots a Kimi Code UI and drives Kimi Code CLI instead of Claude or Codex.
 ---
 
+<Callout type="warn" title="Historical v0 implementation">
+  This page describes the previous application, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
+
 `mkx` is not a fork. It is the **same server and the same web build** as `mcc`, booted with `MACARON_ENGINE=kimi` so it serves the Kimi SPA and drives Kimi Code. This page covers what differs from the Claude path.
 
 ## Three Launchers, One Server

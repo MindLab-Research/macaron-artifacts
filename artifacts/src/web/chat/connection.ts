@@ -1,0 +1,6 @@
+const CONNECTION_KEY = 'macaron-artifacts:connection';
+export type LocalConnection = { origin: string; token: string; expiresAt?: number };
+function read(): LocalConnection | null { try { const value = sessionStorage.getItem(CONNECTION_KEY); if (!value) return null; const connection = JSON.parse(value) as LocalConnection; if (!connection.origin || !connection.token || connection.expiresAt && connection.expiresAt <= Date.now()) { sessionStorage.removeItem(CONNECTION_KEY); return null; } return connection; } catch { return null; } }
+export function consumePairHandoff(): void { if (typeof window === 'undefined') return; try { const pending = sessionStorage.getItem(`${CONNECTION_KEY}:pending`); if (pending) { sessionStorage.setItem(CONNECTION_KEY, pending); sessionStorage.removeItem(`${CONNECTION_KEY}:pending`); } } catch { /* Private browsing may reject storage; the server remains local-only. */ } }
+export function apiUrl(path: string): string { const base = read()?.origin; return base ? new URL(path, `${base}/`).toString() : path; }
+export function connectionHeaders(init?: HeadersInit): Headers { const headers = new Headers(init), token = read()?.token; if (token) headers.set('authorization', `Bearer ${token}`); return headers; }

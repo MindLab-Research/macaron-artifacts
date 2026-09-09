@@ -1,0 +1,210 @@
+/* Wind4 already supplies its reset before utilities. A second reset here overrides button utility backgrounds. */
+@import "./theme/tokens.css";
+/* streamdown 的逐词淡入只输出 `animation: sd-fadeIn`，keyframes 在它自己这个文件里 ——
+   不引就是指向一个不存在的动画，CSS 静默忽略，文字直接蹦出来，看不出任何异常 */
+@import "streamdown/styles.css";
+
+html,
+body {
+  height: 100%;
+  background: var(--surface);
+  color: var(--fg);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root { height: 100%; }
+body { margin: 0; overflow: hidden; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+/* Low-specificity defaults preserve keyboard focus without overriding outline-none
+   on composite controls, whose enclosing border is their focus indicator. */
+:where(:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.suggestion { animation: suggestion-in 200ms ease-out both; }
+@keyframes suggestion-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Shiki 双主题：把 dark 那份变量接到 CSS 变量上，切主题时不用重新高亮一遍。
+   只挑 `span[style]`：那是 shiki 自己吐的 token，带内联的浅色主题配色需要盖掉。
+   写成裸 `span` 会连我们自己塞进 `.shiki` 里的东西一起清掉 —— diff 那根钉住的
+   +/- 标尺就是这么被 `background-color: transparent !important` 打成透明的 */
+:root[data-theme="dark"] .shiki,
+:root[data-theme="dark"] .shiki span[style] {
+  color: var(--shiki-dark) !important;
+  background-color: transparent !important;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shiki,
+  :root:not([data-theme="light"]) .shiki span[style] {
+    color: var(--shiki-dark) !important;
+    background-color: transparent !important;
+  }
+}
+.shiki {
+  background: transparent !important;
+}
+
+/*
+ * streamdown 的默认外观是一整套 Tailwind 类：代码块带标题栏和两个按钮、外框套内框再加底色，
+ * 表格每格都有边框。跟本项目的取向（少层级、有边框就不要底色）是冲突的，所以这里按它暴露的
+ * `[data-streamdown]` 钩子整体接管 —— 组件留这些属性就是给外部改样式用的。
+ */
+.md {
+  --block-gap: 0.75em;
+  /* 正文里一个不带空格的长 token（文件路径、URL）会把气泡整个撑破，进而顶穿窗口宽度 ——
+     气泡自身的 max-w 拦不住它，因为溢出的是行盒不是块。代码块另有 .scroll-x 横向滚动，
+     不受这里影响。 */
+  overflow-wrap: anywhere;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, hr, [data-streamdown="code-block"], [data-streamdown="table-wrapper"]) {
+  margin: 0;
+}
+.md :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, hr, [data-streamdown="code-block"], [data-streamdown="table-wrapper"]) + :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, hr, [data-streamdown="code-block"], [data-streamdown="table-wrapper"]) {
+  margin-top: var(--block-gap);
+}
+.md :where(h1, h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  font-weight: 600;
+}
+.md :where(ul, ol) {
+  padding-left: 1.3em;
+}
+.md [data-streamdown="unordered-list"] {
+  list-style: disc;
+}
+.md [data-streamdown="ordered-list"] {
+  list-style: decimal;
+}
+.md [data-streamdown="link"] {
+  color: var(--link);
+  text-decoration: none;
+}
+.md [data-streamdown="inline-code"] {
+  border-radius: 0.25rem;
+  background: var(--surface-3);
+  padding: 0.1em 0.3em;
+  font-size: 0.9em;
+}
+.md [data-streamdown="blockquote"] {
+  border-left: 2px solid var(--border);
+  padding-left: 0.9em;
+  font-style: normal;
+  color: var(--muted);
+}
+
+/* 代码块：一层盒子、一个底色，标题栏和按钮都不要 */
+.md [data-streamdown="code-block"] {
+  border: 0;
+  border-radius: 0.6rem;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.md [data-streamdown="code-block-header"] {
+  display: none;
+}
+.md [data-streamdown="code-block-body"] {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.86em;
+  overflow-x: auto;
+}
+/* 代码块的正文交给我们自己的 `CodeBlock`（见 MessageBody 的 `components.pre`），
+   它自带内边距和字号，所以这一层只负责把 streamdown 的盒子退成透明 */
+.md [data-streamdown="code-block-body"] :where(pre, code) {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* 表格：靠分隔线而不是格子线，避免嵌套边框 */
+.md [data-streamdown="table-wrapper"] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow-x: auto;
+}
+.md [data-streamdown="table"] {
+  width: 100%;
+  border-collapse: collapse;
+  background: transparent;
+}
+.md :where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]) {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 0.45em 0.7em;
+  text-align: left;
+}
+.md [data-streamdown="table-header-cell"] {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* 渐隐带的强度，0～1。注册成 `<number>` 是为了能被 transition 补间：滚轮一格就是 ~100px，
+   而渐隐带范围也就 96px，所以量出来的值天生是一格 0→1 的跳变。蒙版宽度、模糊半径、透明度
+   全都从这一个变量算出来，于是它们必然同步 —— 各自补各自的话，backdrop-filter 慢一两帧合成，
+   看起来就是「模糊后到，而且是突然出现的」。 */
+@property --fade-top {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --fade-bottom {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* 代码块这类被蒙版盖住的滚动区：蒙版是盖在整个窗口上的，滚动条会被一起糊掉、还挡着最右边的字。
+   `scrollbar-width` 在 Chrome 121+ / Firefox 生效，`::-webkit-scrollbar` 兜住 Safari。 */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* 横向滚动区，滚动条藏起来、右缘改用渐隐来说明「右边还有」——两件事必须一起，单独藏掉滚动条
+   就没有任何东西告诉用户还能滚（实测一条 1303px 的代码行在 527px 的框里，看上去就是被截断的
+   死内容）。`animation-timeline` 让渐隐在滚到底时自己消失，纯 CSS，没有滚动监听。 */
+.scroll-x {
+  overflow-x: auto;
+  scrollbar-width: none;
+  animation: fade-x-end linear;
+  animation-timeline: scroll(self inline);
+}
+.scroll-x::-webkit-scrollbar {
+  display: none;
+}
+/* 渐隐带只在最后一段路里收掉：等距插值的话，一个只能滚几十像素的框全程都糊着右边一截。
+   `to` 那帧的 `100%` 是把渐变的起点推到最右 —— 等价于没有渐隐，但仍是同一个可插值的值。 */
+@keyframes fade-x-end {
+  from,
+  85% {
+    mask-image: linear-gradient(90deg, #000 calc(100% - 2rem), transparent);
+  }
+  to {
+    mask-image: linear-gradient(90deg, #000 100%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

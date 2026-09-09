@@ -1,88 +1,92 @@
 ---
 title: Usage
-description: Install the Macaron WebUI on Claude Code, Codex, and Kimi Code, open it, and drive sessions from the browser.
+description: Install one macaron-artifacts package and choose Claude Code, Codex, OpenCode, or pi inside the unified WebUI.
 ---
 
-A WebUI that installs on Claude Code, Codex, and Kimi Code — run all three at once. After install, launch it from the CLI with one line:
-
-- Claude → [http://localhost:7878](http://localhost:7878)
-- Codex → [http://localhost:7979](http://localhost:7979)
-- Kimi → [http://localhost:7980](http://localhost:7980)
+Macaron Artifacts runs Claude Code, Codex, OpenCode, and pi in the same local WebUI. Each conversation selects its own harness, workspace, and optional model.
 
 ## Install
 
-### Claude Code
+Macaron Artifacts requires Node.js 22.19 or newer. For Claude Code, Codex, or OpenCode, install and authenticate the native CLI first; the app inherits its local configuration. The pi SDK is included and reads your `~/.pi/agent` configuration, so it needs no separate pi executable.
 
-```
-/plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
-/plugin install macaron@macaron
-```
+Run this commit's preview package:
 
-Then open it in a session with `/macaron`.
-
-### Codex
-
-```bash
-codex plugin marketplace add https://github.com/MindLab-Research/macaron-artifacts
-codex plugin add macaron@macaron
+```sh
+bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
-Then say `open macaron web ui` in a session to open it.
+Or install the same package globally:
 
-### Kimi Code
-
-```
-/plugins install https://github.com/MindLab-Research/macaron-artifacts
-/reload
+```sh
+npm install -g https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
+macaron-artifacts
 ```
 
-Then open it in a session with `/macaron:macaron`.
+Open [http://127.0.0.1:43860](http://127.0.0.1:43860). The commands are pinned to this documentation build's commit; use a commit with a successful package preview build.
 
-### Without Installing the Plugin — One `bunx` Line
+### Connect from the website
 
-The published tarball ships the prebuilt server + web bundles as three independent packages — `mcc` (Claude WebUI, port `7878`), `mcx` (Codex WebUI, port `7979`), and `mkx` (Kimi WebUI, port `7980`). Launch any of them in one command:
+Run `macaron-artifacts --pair` on the machine that has your coding agents installed. On [the connect page](/connect), enter `http://127.0.0.1:43860` and the one-time code printed by the command. The code expires after ten minutes and is consumed once; credentials stay in the browser tab and the agent machine.
 
-```bash
-bunx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>   # Claude → http://localhost:7878
-bunx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>   # Codex  → http://localhost:7979
-bunx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>   # Kimi   → http://localhost:7980
+For an SSH machine, keep the server bound to loopback and forward it to your computer:
 
-npx mcc@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcc@<sha>    # Claude → http://localhost:7878
-npx mcx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mcx@<sha>    # Codex  → http://localhost:7979
-npx mkx@https://pkg.pr.new/MindLab-Research/macaron-artifacts/mkx@<sha>    # Kimi   → http://localhost:7980
+```sh
+ssh -N -L 43860:127.0.0.1:43860 user@host
 ```
 
-The commands are pinned to this build's commit; swap in any other commit on `main` to pull that build. Each launcher boots the same server with `MACARON_ENGINE` set (`codex` / `kimi`; unset = Claude) and its own default port. All bins accept `--host` / `--port`; run `--help` for all flags.
+Then use the forwarded `http://127.0.0.1:43860` address in the connect form. The website never needs direct network access to the remote machine.
 
-## Using It
+<Callout title="One package, one launcher">
+  `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code, Codex, OpenCode, and pi are selected inside the app. Kimi Code, Hermes, and dsh are not supported in this release.
+</Callout>
 
-Once inside the WebUI:
+## Start a conversation
 
-- Click a workspace in the sidebar to enter its canvas; pin a session with `+`
-- On the canvas: drag the grip to reposition, pull the bottom-right corner to resize, click a tile to focus
-- Input box: `Enter` sends · `Shift+Enter` for a newline · `↑`/`↓` cycles history · paste an image to attach it
+1. Select **New conversation** and enter your workspace directory.
+2. Choose **Claude Code**, **Codex**, **OpenCode**, or **pi**. Leave the model field empty to use that harness's default. OpenCode and pi accept an optional `provider/model` override.
+3. Send a message. Text, reasoning, and supported tool events stream into the conversation.
+4. Respond to approval requests in the chat when they appear. For pi, the host gates tool execution through its SDK hook.
 
-The Codex side works out of the box: by default it uses the `system` provider, which inherits your `~/.codex/config.toml` (endpoint, model, auth). Filling in a custom Base URL / API Key / Model under **Settings** is optional — only needed to point Codex at a different provider. The Kimi side likewise defaults to your ambient Kimi Code login; custom providers set under **Settings** persist to `~/.kimi-code/macaron-kimi-config.json`.
+Switching conversations keeps background turns running. Refreshing reconnects to an active turn; **Stop** explicitly cancels it. Titles and follow-up suggestions arrive independently after the main response, so they do not hold the composer open.
 
-## Updating
+Streaming follows each harness's native events. OpenCode exposes text/reasoning deltas and tool input snapshots. pi also exposes raw tool argument deltas; its command output arrives as cumulative updates.
 
-### Claude Code
+OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported here. Tool execution approvals appear in the conversation.
 
+## Generated UI
+
+- An inline `ui4a/tsx` fenced module renders inside its assistant message as the source arrives.
+- A file at `.artifacts/canvases/<name>.ui4a.tsx` opens in **Canvas**. Relative TypeScript, TSX, and JSON imports resolve inside `.artifacts`.
+- The small `$ui4a/ui` component library shares the app's theme. Separate `$ui4a/chat`, `$ui4a/state`, and `$ui4a/fs` modules provide scoped host capabilities.
+- Choose a Shiki theme from the sidebar; both syntax highlighting and interface colors follow it.
+
+Workspace files remain in the selected directory. Deleting a conversation does not delete those files. Existing native session-history migration and attachments are not included in this version.
+
+## Configuration
+
+```sh
+macaron-artifacts --port 43860 --data-dir /path/to/session-data
+macaron-artifacts --help
 ```
-/plugin update macaron
-```
 
-### Codex
+| Variable | Purpose |
+| --- | --- |
+| `MACARON_PORT` | UI and API port, default `43860` |
+| `MACARON_DATA_DIR` | Conversation storage, default `~/.macaron-artifacts/sessions` |
+| `MACARON_CLAUDE_PATH` | Claude Code executable |
+| `MACARON_CODEX_PATH` | Codex executable |
+| `MACARON_OPENCODE_PATH` | OpenCode executable |
+| `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
+| `MACARON_PAIR` | Enable one-time hosted WebUI pairing (`1` or `true`) |
+| `MACARON_ALLOWED_ORIGINS` | Comma-separated allowed website origins |
 
-```bash
-codex plugin marketplace upgrade macaron   # pull the latest version
-codex plugin remove macaron@macaron
-codex plugin add macaron@macaron           # reinstall
-```
+For a custom Claude gateway, launch with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as your CLI. Environment variables set only inside a shell alias do not reach a separately launched app.
 
-### Kimi Code
+The API binds to loopback and accepts same-origin browser requests. Generated React runs in the host page; use it with trusted local code.
 
-Open `/plugins`, select `macaron` on the **Installed** tab, and press `Enter` to install the available update — then `/reload`.
+## Update
+
+Run or install the same `macaron-artifacts` package URL with the SHA of a newer successful build. App conversations remain in the configured data directory.
 
 ## Feedback
 

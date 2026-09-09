@@ -1,0 +1,93 @@
+/* 语义 token 的唯一定义处（见 CLAUDE.md §8）。单独一个文件是因为导出的单文件 HTML 也要用同一份
+   —— 它不加载 globals.css 的其余部分，而 token 少一个就是「页面能开但没有底色和主色」。 */
+:root,
+.theme-sample[data-palette="playground"] {
+  --surface: #ffffff;
+  --surface-2: #f7f7f8;
+  --surface-3: #ececef;
+  --border: #e2e2e6;
+  --fg: #16161a;
+  --muted: #6b6b76;
+  --accent: #1a1a1f;
+  --accent-fg: #ffffff;
+  --accent-hover: #35353b;
+  --focus: #1a1a1f;
+  --link: #1a1a1f;
+  --control-border: var(--border);
+  --input-bg: var(--surface-2);
+  --input-fg: var(--fg);
+  --input-border: var(--border);
+  --input-placeholder: var(--muted);
+  --dropdown-bg: var(--surface);
+  --dropdown-fg: var(--fg);
+  --dropdown-border: var(--border);
+  --danger-bg: #b52643;
+  --danger-fg: #ffffff;
+  --danger-hover: #9e203a;
+  --danger: #d9435f;
+  /* 分类色。语义 token 只够表达「主/危险/次要」三种意思，而占比条、多系列图表需要
+     一组彼此可区分、又不各自表意的颜色 —— 没有它，生成代码画到第四个分类就只能写死 hex。 */
+  --series-1: #3b82f6;
+  --series-2: #f59e0b;
+  --series-3: #10b981;
+  --series-4: #ec4899;
+  --series-5: #8b5cf6;
+  --series-6: #14b8a6;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"],
+:root:not([data-theme="light"]) {
+  @media (prefers-color-scheme: dark) {
+    --surface: #0e0e11;
+    --surface-2: #16161a;
+    --surface-3: #212127;
+    --border: #2c2c34;
+    --fg: #f2f2f5;
+    --muted: #9a9aa6;
+    --accent: #f2f2f5;
+    --accent-fg: #0e0e11;
+    --accent-hover: #d9d9e0;
+    --focus: #f2f2f5;
+    --link: #f2f2f5;
+    --control-border: var(--border);
+    --danger-bg: #ff6b83;
+    --danger-fg: #0e0e11;
+    --danger-hover: #ff879a;
+    --danger: #ff6b83;
+    --series-1: #60a5fa;
+    --series-2: #fbbf24;
+    --series-3: #34d399;
+    --series-4: #f472b6;
+    --series-5: #a78bfa;
+    --series-6: #2dd4bf;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"],
+.theme-sample[data-palette="playground"][data-theme="dark"] {
+  --surface: #0e0e11;
+  --surface-2: #16161a;
+  --surface-3: #212127;
+  --border: #2c2c34;
+  --fg: #f2f2f5;
+  --muted: #9a9aa6;
+  --accent: #f2f2f5;
+  --accent-fg: #0e0e11;
+  --accent-hover: #d9d9e0;
+  --focus: #f2f2f5;
+  --link: #f2f2f5;
+  --control-border: var(--border);
+  --danger-bg: #ff6b83;
+  --danger-fg: #0e0e11;
+  --danger-hover: #ff879a;
+  --danger: #ff6b83;
+  --series-1: #60a5fa;
+  --series-2: #fbbf24;
+  --series-3: #34d399;
+  --series-4: #f472b6;
+  --series-5: #a78bfa;
+  --series-6: #2dd4bf;
+  color-scheme: dark;
+}

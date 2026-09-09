@@ -8,10 +8,13 @@ import {
 } from 'react-router';
 import { RootProvider } from 'fumadocs-ui/provider/react-router';
 import type { Route } from './+types/root';
+import 'virtual:uno.css';
+import 'virtual:fumadocs-compat.css';
 import './app.css';
 import SearchDialog from '@/components/search';
 import { trackerProps } from '@/lib/telemetry';
 import NotFound from './routes/not-found';
+import { PaletteProvider } from '@/components/palette';
 
 export const links: Route.LinksFunction = () => [
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
@@ -36,8 +39,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
         <script defer {...trackerProps} />
       </head>
-      <body className="flex flex-col min-h-screen">
-        <RootProvider search={{ SearchDialog }}>{children}</RootProvider>
+      <body className="site:flex site:flex-col site:min-h-screen">
+        <RootProvider search={{ SearchDialog }}><PaletteProvider>{children}</PaletteProvider></RootProvider>
         <ScrollRestoration />
         <Scripts />
       </body>
@@ -64,11 +67,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   return (
-    <main className="pt-16 p-4 w-full max-w-[1400px] mx-auto">
+    <main className="site:pt-16 site:p-4 site:w-full site:max-w-[1400px] site:mx-auto">
       <h1>{message}</h1>
       <p>{details}</p>
       {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
+        <pre className="site:w-full site:p-4 site:overflow-x-auto">
           <code>{stack}</code>
         </pre>
       )}

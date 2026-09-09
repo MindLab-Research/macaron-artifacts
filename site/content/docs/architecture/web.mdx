@@ -1,30 +1,35 @@
 ---
 title: Web
-description: The React SPA — two entries, the GenUI runtime bootstrap, a fetch-based SSE reader, and the session canvas.
+description: The retained React SPA entries, the GenUI runtime bootstrap, a fetch-based SSE reader, and the session canvas.
 ---
 
-The front end (`web/`) is a Vite + React SPA. It has no server-side rendering — the Fastify server just hands the browser one of two prebuilt HTML documents and the app takes over from there with a hash router.
+<Callout type="warn" title="Historical v0 implementation">
+  This page describes the previous application, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
 
-## Two Entries, One Build
+The front end (`web/`) is a Vite + React SPA. It has no server-side rendering — the Fastify server hands the browser the selected prebuilt HTML document and the app takes over from there with a hash router.
 
-`web/vite.config.ts` declares **two Rollup inputs**, so a single `vite build` emits two SPA bundles that share their asset chunks:
+## Harness Entries, One Build
+
+`web/vite.config.ts` declares the Claude, Codex, and Kimi entries in one build, so their SPA bundles share asset chunks:
 
 ```ts
 input: {
   main: path.resolve(__dirname, 'index.html'),   // Claude UI
   codex: path.resolve(__dirname, 'codex.html'),  // Codex UI
+  kimi: path.resolve(__dirname, 'kimi.html'),    // Kimi UI
 }
 ```
 
 The server picks which one is `/` at boot (see [Overview](/docs/architecture/overview)). In dev, Vite serves on `:5273` (`strictPort`) and proxies `/api` to the server on `:7878`.
 
-<Callout title="The @ alias points at vendored source">
-  `@` resolves to `web/src/macaron-vendor` — the vendored Macaron GenUI source (`source.tsx`, `components/ui/*`). When `@macaron/ui` is published on npm, the plan is to swap these imports and delete the vendor dir; the intent is flagged in `main.tsx` and the vendor `README.md`.
+<Callout title="One lightweight component contract">
+  The retained web application shares the unified app's six `$ui4a/ui` components: Button, Field, Card, Badge, Tabs, and Disclosure. Native HTML and UnoCSS Wind4 utilities handle layout; additional controls and charts use `@headlessui/react` and `recharts` directly. `$macaron/ui` remains a compatibility alias for these same six exports. React and `partial-react` are deduplicated by Vite.
 </Callout>
 
 ## Runtime Bootstrap
 
-The three entries bootstrap GenUI differently. The **Claude** entry (`web/src/main.tsx`) stands up the whole GenUI runtime *before* the app renders — model-authored TSX previews are core to that UI, so the globals must exist up front. The **Codex** and **Kimi** entries (`web/src/codex/main.tsx`, `web/src/kimi/main.tsx`) deliberately do not: they stay small chat-focused bundles and **lazy-load** the GenUI runtime (`React.lazy` + `Suspense` in their chat views, ~500 KB gzip) only when a `render_ui` card actually needs to render.
+The three entries bootstrap GenUI differently. The **Claude** entry (`web/src/main.tsx`) stands up the whole GenUI runtime *before* the app renders — model-authored TSX previews are core to that UI, so the globals must exist up front. The **Codex** and **Kimi** entries (`web/src/codex/main.tsx`, `web/src/kimi/main.tsx`) stay chat-focused and **lazy-load** the GenUI runtime (`React.lazy` + `Suspense` in their chat views) only when a `render_ui` card needs to render.
 
 The steps below describe the Claude bootstrap:
 
@@ -32,12 +37,12 @@ The steps below describe the Claude bootstrap:
 <Step>
 ### Expose React + Macaron globals
 
-React, the JSX runtimes, ReactDOM, the vendored Macaron UI (`MacaronUI`, `MacaronCharts`, `MacaronLucide`) and `motion/react` are imported as namespaces and published to the page so streamed GenUI modules can resolve them without a bundler.
+React, the JSX runtimes, ReactDOM, the six UI4A components, Headless UI, Recharts, Lucide, and `motion/react` are imported as namespaces and published to the page so streamed GenUI modules can resolve them without a bundler. Chat actions use the retained `$macaron/chat` bridge.
 </Step>
 <Step>
 ### Boot the UnoCSS runtime
 
-`@unocss/runtime` with `presetWind3` + animations generates utility classes from the DOM at runtime, mirroring Macaron's own `uno.config.ts`. A Tailwind reset is imported first so native control styles don't leak into previews.
+`@unocss/runtime` with `presetWind4` + animations generates utility classes from the DOM at runtime. All three entries share one initialization path and Wind4's built-in reset, so lazily opening a generated UI never injects another reset over the application.
 </Step>
 <Step>
 ### Mount the hash router

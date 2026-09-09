@@ -1,5 +1,7 @@
 # Macaron Artifacts
 
+> **Historical v0 guide.** These pages describe the retired WebUI and plugin launchers, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). For the current unified application, follow the [README](../README.md).
+
 A local WebUI that ships as a plugin for Claude Code, Codex, and Kimi Code — install any of them, and they run side-by-side:
 
 - Claude → <http://localhost:7878>

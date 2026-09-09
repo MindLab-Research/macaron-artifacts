@@ -3,6 +3,10 @@ title: Server
 description: The Fastify server — bootstrap, auth, the Claude Agent SDK loop, the provider relay, and the SSE stream.
 ---
 
+<Callout type="warn" title="Historical v0 implementation">
+  This page describes the previous application, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
+
 The server is a single Fastify app (`server/src/index.ts`). It owns the agent runtimes, exposes a REST + SSE API (most routes under `/api/*`, with the provider relay mounted separately at `/relay/*`), relays provider traffic for the Claude CLI, and serves the SPA. Everything runs from one process, bound to loopback by default.
 
 ## Configuration

@@ -1,12 +1,13 @@
 packages:
-  - 'shared'
-  - 'server'
-  - 'web'
-  - 'mcx'
-  - 'mkx'
+  - 'artifacts'
+# Let npm pack warn via devEngines while pnpm still selects the declared version.
+pmOnFail: download
+# Keep local resolutions aligned with pnpm's CI release-age policy.
+minimumReleaseAge: 1440
 # partial-tsx is a URL subdep of partial-react (our own pkg.pr.new package), already pinned in the lockfile and trusted.
 # pnpm 10.26+ defaults blockExoticSubdeps=true, which blocks URL subdeps; allow it explicitly here.
 blockExoticSubdeps: false
 allowBuilds:
+  '@google/genai': false
   esbuild: true
-  node-pty: true
+  protobufjs: false

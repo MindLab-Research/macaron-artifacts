@@ -4,6 +4,7 @@
 # React Router
 /.react-router/
 /build/
+/public/app/
 .source
 .vercel
 .env*

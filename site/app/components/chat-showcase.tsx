@@ -45,14 +45,14 @@ function BarChart() {
   const raised = useRaised();
   const [active, setActive] = useState(3);
   return (
-    <div className="flex h-28 items-end gap-1.5">
+    <div className="site:flex site:h-28 site:items-end site:gap-1.5">
       {BARS.map((h, i) => (
         <button
           key={i}
           type="button"
           aria-label={`Bar ${i + 1}`}
           onClick={() => setActive(i)}
-          className={cn('flex-1 cursor-pointer rounded-t-md', i === active ? 'bg-genui' : 'bg-genui/40 hovered:bg-genui/60')}
+          className={cn('site:flex-1 site:cursor-pointer site:rounded-t-md', i === active ? 'site:bg-genui' : 'site:bg-genui/40 site:hovered:bg-genui/60')}
           style={{ height: raised ? `${h}%` : '4%', transition: `height 0.6s ${SPRING}, background-color 0.2s`, transitionDelay: raised ? `${i * 40}ms` : '0ms' }}
         />
       ))}
@@ -68,8 +68,8 @@ function LineChart() {
   const pts = LINE.map((v, i) => [(i / (LINE.length - 1)) * 100, 100 - v] as const);
   const d = `M${pts.map((p) => p.join(' ')).join(' L')}`;
   return (
-    <div className="relative mx-2 h-28">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full overflow-visible">
+    <div className="site:relative site:mx-2 site:h-28">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="site:absolute site:inset-0 site:size-full site:overflow-visible">
         <path d={`${d} L100 100 L0 100 Z`} fill="var(--genui)" opacity={raised ? 0.12 : 0} style={{ transition: 'opacity 0.7s 0.5s' }} />
         {/* pathLength=1 normalizes the dash so a single dashoffset sweep draws the line */}
         <path
@@ -92,12 +92,12 @@ function LineChart() {
           type="button"
           aria-label={`Point ${i + 1}`}
           onClick={() => setActive(i)}
-          className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1.5"
+          className="site:absolute site:-translate-x-1/2 site:-translate-y-1/2 site:cursor-pointer site:p-1.5"
           style={{ left: `${x}%`, top: `${y}%` }}
         >
           {/* dot pop is timed to trail the ~1s line sweep across 8 points */}
           <span
-            className={cn('chat-dot block size-2.5 rounded-full transition-all duration-200', i === active ? 'scale-125 bg-genui' : 'bg-genui/55 hovered:bg-genui/80')}
+            className={cn('chat-dot site:block site:size-2.5 site:rounded-full site:transition-all site:duration-200', i === active ? 'site:scale-125 site:bg-genui' : 'site:bg-genui/55 site:hovered:bg-genui/80')}
             style={{ animationDelay: `${i * 120}ms` }}
           />
         </button>
@@ -115,18 +115,18 @@ const SCATTER: [number, number, number][] = [
 function ScatterChart() {
   const [active, setActive] = useState(7);
   return (
-    <div className="relative h-28">
+    <div className="site:relative site:h-28">
       {SCATTER.map(([x, y, s], i) => (
         <button
           key={i}
           type="button"
           aria-label={`Dot ${i + 1}`}
           onClick={() => setActive(i)}
-          className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1.5"
+          className="site:absolute site:-translate-x-1/2 site:-translate-y-1/2 site:cursor-pointer site:p-1.5"
           style={{ left: `${x}%`, top: `${y}%` }}
         >
           <span
-            className={cn('chat-dot block rounded-full transition-all duration-200', s === 3 ? 'size-3' : 'size-2', i === active ? 'scale-150 bg-genui' : 'bg-genui/45 hovered:bg-genui/70')}
+            className={cn('chat-dot site:block site:rounded-full site:transition-all site:duration-200', s === 3 ? 'site:size-3' : 'site:size-2', i === active ? 'site:scale-150 site:bg-genui' : 'site:bg-genui/45 site:hovered:bg-genui/70')}
             style={{ animationDelay: `${i * 55}ms` }}
           />
         </button>
@@ -155,14 +155,14 @@ function RadarChart() {
   const axes = RADAR[0].length;
   const d = radarPath(RADAR[sel]);
   return (
-    <button type="button" aria-label="Radar dataset" onClick={() => setSel((s) => (s + 1) % RADAR.length)} className="mx-auto block h-28 cursor-pointer">
-      <svg viewBox="0 0 100 100" className="size-full overflow-visible">
+    <button type="button" aria-label="Radar dataset" onClick={() => setSel((s) => (s + 1) % RADAR.length)} className="site:mx-auto site:block site:h-28 site:cursor-pointer">
+      <svg viewBox="0 0 100 100" className="site:size-full site:overflow-visible">
         {[1, 0.66, 0.33].map((r) => (
-          <path key={r} d={radarPath(Array(axes).fill(r))} fill="none" stroke="currentColor" strokeWidth={0.75} className="text-fd-muted-foreground/30" />
+          <path key={r} d={radarPath(Array(axes).fill(r))} fill="none" stroke="currentColor" strokeWidth={0.75} className="site:text-fd-muted-foreground/30" />
         ))}
         {Array.from({ length: axes }, (_, i) => {
           const a = (Math.PI * 2 * i) / axes - Math.PI / 2;
-          return <line key={i} x1={50} y1={50} x2={50 + Math.cos(a) * 44} y2={50 + Math.sin(a) * 44} stroke="currentColor" strokeWidth={0.75} className="text-fd-muted-foreground/30" />;
+          return <line key={i} x1={50} y1={50} x2={50 + Math.cos(a) * 44} y2={50 + Math.sin(a) * 44} stroke="currentColor" strokeWidth={0.75} className="site:text-fd-muted-foreground/30" />;
         })}
         {/* CSS `d` interpolates in Chromium, so clicking morphs the polygon springily */}
         <path
@@ -187,7 +187,7 @@ function RadarChart() {
 
 function GenUICard({ kind }: { kind: GenUI }) {
   return (
-    <div className="w-full rounded-2xl rounded-bl-md bg-genui/10 p-4">
+    <div className="site:w-full site:rounded-2xl site:rounded-bl-md site:bg-genui/10 site:p-4">
       {kind === 'bar' ? <BarChart /> : kind === 'line' ? <LineChart /> : kind === 'scatter' ? <ScatterChart /> : <RadarChart />}
     </div>
   );
@@ -196,15 +196,15 @@ function GenUICard({ kind }: { kind: GenUI }) {
 function Row({ entry, animate }: { entry: Entry; animate: boolean }) {
   const human = 'side' in entry && entry.side === 'human';
   return (
-    <div className={cn('grid', animate && 'chat-grow')}>
-      <div className="min-h-0 overflow-hidden">
-        <div className={cn('flex pt-3', human ? 'justify-end' : 'justify-start')}>
-          <div className={cn(animate && 'chat-pop', human ? 'origin-bottom-right' : 'origin-bottom-left', 'genui' in entry ? 'w-[85%]' : 'max-w-[75%]')}>
+    <div className={cn('site:grid', animate && 'chat-grow')}>
+      <div className="site:min-h-0 site:overflow-hidden">
+        <div className={cn('site:flex site:pt-3', human ? 'site:justify-end' : 'site:justify-start')}>
+          <div className={cn(animate && 'chat-pop', human ? 'site:origin-bottom-right' : 'site:origin-bottom-left', 'genui' in entry ? 'site:w-[85%]' : 'site:max-w-[75%]')}>
             {'genui' in entry ? (
               <GenUICard kind={entry.genui} />
             ) : (
               <div
-                className={cn('max-w-full rounded-2xl', human ? 'rounded-br-md bg-fd-foreground/10' : 'rounded-bl-md bg-fd-secondary')}
+                className={cn('site:max-w-full site:rounded-2xl', human ? 'site:rounded-br-md site:bg-fd-foreground/10' : 'site:rounded-bl-md site:bg-fd-secondary')}
                 style={{ width: entry.w, height: entry.tall ? 52 : 36 }}
               />
             )}
@@ -235,8 +235,8 @@ export default function ChatShowcase() {
   }, []);
 
   return (
-    <div className="chat-mask relative h-105 overflow-hidden">
-      <div className="absolute inset-x-0 bottom-0">
+    <div className="chat-mask site:relative site:h-105 site:overflow-hidden">
+      <div className="site:absolute site:inset-x-0 site:bottom-0">
         {rows.map(({ id, entry, animate }) => (
           <Row key={id} entry={entry} animate={animate} />
         ))}

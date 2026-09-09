@@ -1,5 +1,6 @@
 import { defineConfig, defineDocs } from 'fumadocs-mdx/config';
 import { resolveCommitSha } from './app/lib/commit-sha';
+import { syntaxThemes } from './app/lib/palettes';
 
 // Replace the `<sha>` placeholder in fenced install commands with the build commit's short
 // SHA, so the rendered commands pin to whatever commit produced the docs. Runs at build time.
@@ -25,6 +26,7 @@ export const docs = defineDocs({
 
 export default defineConfig({
   mdxOptions: {
+    rehypeCodeOptions: { themes: syntaxThemes },
     remarkPlugins: [remarkCommitSha],
   },
 });

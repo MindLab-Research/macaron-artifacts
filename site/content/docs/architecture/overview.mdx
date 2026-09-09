@@ -3,6 +3,10 @@ title: Overview
 description: A tour of how Macaron Artifacts fits together — one server binary, three SPA entries, and a live GenUI renderer.
 ---
 
+<Callout type="warn" title="Historical v0 implementation">
+  This page describes the previous application, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
+
 Macaron Artifacts is a local WebUI for driving agent sessions from the browser. Under the hood it is a small monorepo: a **Fastify server** that fronts the Claude Agent SDK, Codex (via the `codex app-server` transport by default), and the Kimi Code CLI, a **React SPA** that renders sessions and streams turns, and a **shared** package that pins the wire contract between them. This section walks the whole system top to bottom.
 
 <Callout title="Who this is for">
@@ -40,7 +44,7 @@ Macaron Artifacts is a local WebUI for driving agent sessions from the browser. 
       <File name="kimi.html" />
       <Folder name="src">
         <File name="main.tsx" />
-        <Folder name="macaron-vendor" />
+        <Folder name="components" />
       </Folder>
     </Folder>
     <Folder name="bin">
@@ -57,7 +61,7 @@ Macaron Artifacts is a local WebUI for driving agent sessions from the browser. 
 
 - **shared** — `types.ts` holds the REST + domain types, `sse.ts` the streaming contract.
 - **server** — `index.ts` is the Fastify bootstrap, `config.ts` the ports / hosts / derived paths. Under `src/lib`, `claude-runner.ts` drives the Claude Agent SDK loop, `codex-app-server.ts` is the Codex app-server client, `kimi-runner.ts` spawns the Kimi Code CLI per turn, `session-store.ts` reads `~/.claude` transcripts and `codex-store.ts` reads `~/.codex` rollouts. `src/routes` mounts the API slices — most under `/api/*` (sessions, codex, kimi, …), plus the provider relay at `/relay/*`.
-- **web** — `index.html` is the Claude SPA entry, `codex.html` the Codex one, and `kimi.html` the Kimi one; `src/main.tsx` bootstraps the router + GenUI runtime, `src/macaron-vendor/` is the vendored GenUI renderer.
+- **web** — `index.html` is the retained Claude SPA entry, `codex.html` the Codex one, and `kimi.html` the Kimi one. They use the published `partial-react` renderer and share the unified app's six lightweight `$ui4a/ui` components, with UnoCSS Wind4 styling, direct Headless UI and Recharts imports, and a small host bridge in `src/components/GenuiRenderer.tsx`.
 - **bin / mcx / mkx** — `mcc.mjs` is the Claude launcher; the `mcx` and `mkx` members each ship their own self-contained Codex / Kimi launcher.
 
 The workspace (`pnpm-workspace.yaml`) has five members: `shared`, `server`, `web`, `mcx`, and `mkx`. The root package is published as **`mcc`** (the Claude launcher); **`mcx`** and **`mkx`** are self-contained packages that ship their own copy of the built server and web bundles.
@@ -88,10 +92,10 @@ The Web layer has three entries that boot from the same server: the Claude UI, t
     How the same binary boots the Kimi SPA and drives the Kimi Code CLI (`kimi -p --output-format stream-json`).
   </Card>
   <Card title="GenUI" href="/docs/architecture/genui">
-    The `render_ui` tool + vendored renderer that compile model-authored TSX to a live component as tokens stream.
+    The `render_ui` tool, partial-react renderer, and shared lightweight UI4A components that render model-authored TSX as tokens stream.
   </Card>
   <Card title="Packaging" href="/docs/architecture/packaging">
-    Three publishable launchers, prebuilt bundles, and the pkg.pr.new per-commit release flow.
+    The unified package, prebuilt bundles, and the pkg.pr.new per-commit release flow.
   </Card>
 </Cards>
 

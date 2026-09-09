@@ -2,7 +2,7 @@
 //
 // A separate umami website from the local WebUI's: this is a public marketing
 // and docs site, so the questions are entirely different — which install path
-// people actually copy, which engine they pick, whether Connect works for them.
+// people actually copy and which documentation helps them get started.
 // Sharing one website id would mix those with per-machine WebUI usage and make
 // both unreadable.
 //
@@ -12,17 +12,11 @@
 const HOST = 'https://u-m-a-m-i.macaron.im';
 const WEBSITE_ID = 'c2b171a3-5bac-442d-aef7-f861e2cec3d8';
 
-export type Engine = 'claude' | 'codex' | 'kimi';
-
 export interface SiteEvents {
   /** Hero / card links out of the landing page. */
   cta_click: { target: string; section: string };
   /** A command was copied to the clipboard — the strongest install-intent signal. */
-  command_copy: { engine: Engine | 'shared'; kind: 'plugin' | 'bunx' | 'npx' | 'run' };
-  /** Engine or package-manager tab switched. */
-  tab_switch: { group: string; value: string };
-  /** Connect form submitted. `ok` is false when validation rejected the target. */
-  connect_submit: { engine: Engine; ok: boolean; hasToken: boolean };
+  command_copy: { engine: 'shared'; kind: 'bunx' };
 }
 
 type Umami = { track: (name: string, data?: Record<string, unknown>) => void };

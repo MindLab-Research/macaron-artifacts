@@ -1,13 +1,3 @@
-@import 'tailwindcss';
-@import 'fumadocs-ui/css/neutral.css';
-@import 'fumadocs-ui/css/preset.css';
-
-/* Tailwind's default `hover:` is gated behind `@media (hover: hover)`, so the
-   style is dropped on touch devices — and on headless browsers that report no
-   hover capability. Use `hovered:` for landing-page affordances that should
-   respond to any pointer and stay verifiable in automated checks. */
-@custom-variant hovered (&:hover);
-
 /* Fumadocs Steps normally inherit prose margins. The landing page is not a
    prose container, so give its install flow a deliberately spacious rhythm. */
 #nd-home-layout .fd-steps {
@@ -41,26 +31,26 @@
   }
 }
 
-#nd-home-layout section.max-w-3xl > .mt-8 {
+#nd-home-layout section.site\:max-w-3xl > .site\:mt-8 {
   margin-top: 2.5rem;
 }
 
-#nd-home-layout section.max-w-3xl > .mt-8 + p {
+#nd-home-layout section.site\:max-w-3xl > .site\:mt-8 + p {
   margin-bottom: 1.25rem;
   line-height: 1.6;
 }
 
-#nd-home-layout [role='tabpanel'] > .flex.flex-col {
+#nd-home-layout [role='tabpanel'] > .site\:flex.site\:flex-col {
   gap: 1.25rem;
 }
 
-#nd-home-layout [role='tabpanel'] > .flex.flex-col > div {
+#nd-home-layout [role='tabpanel'] > .site\:flex.site\:flex-col > div {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-#nd-home-layout [role='tabpanel'] > .flex.flex-col > div > .flex {
+#nd-home-layout [role='tabpanel'] > .site\:flex.site\:flex-col > div > .site\:flex {
   margin-bottom: 0;
 }
 
@@ -73,9 +63,17 @@
   --genui: #e08159;
 }
 
-@theme inline {
-  --color-genui: var(--genui);
+/* The default Fumadocs sidebar specializes Neutral. Selected Shiki palettes inherit the same host tokens everywhere. */
+:root[data-palette] #nd-sidebar {
+  --color-fd-muted: inherit;
+  --color-fd-secondary: inherit;
+  --color-fd-muted-foreground: inherit;
 }
+:root[data-palette='vitesse-light'] .shiki code span { color: var(--shiki-vitesse-light); font-style: var(--shiki-vitesse-light-font-style); }
+:root[data-palette='vitesse-dark'] .shiki code span { color: var(--shiki-vitesse-dark); font-style: var(--shiki-vitesse-dark-font-style); }
+:root[data-palette='github-light'] .shiki code span { color: var(--shiki-github-light); font-style: var(--shiki-github-light-font-style); }
+:root[data-palette='github-dark'] .shiki code span { color: var(--shiki-github-dark); font-style: var(--shiki-github-dark-font-style); }
+:root[data-palette='nord'] .shiki code span { color: var(--shiki-nord); font-style: var(--shiki-nord-font-style); }
 
 /* New chat rows grow from zero height (fr units interpolate) while the bubble
    itself springs in with a small overshoot; the springy ease on the row growth

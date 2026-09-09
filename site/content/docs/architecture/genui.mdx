@@ -1,7 +1,11 @@
 ---
 title: GenUI
-description: The render_ui tool and the vendored renderer that compile model-authored TSX into a live component while tokens stream.
+description: The render_ui tool, partial-react renderer, and lightweight UI4A components that render model-authored TSX while tokens stream.
 ---
+
+<Callout type="warn" title="Historical v0 implementation">
+  This page describes the previous application, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
+</Callout>
 
 GenUI is Macaron's headline feature: the model doesn't just describe a UI, it **writes TSX that renders live** in the conversation. Two halves make this work — a server-side tool the model calls, and a browser-side renderer that compiles and mounts the streamed code.
 
@@ -21,7 +25,7 @@ GenUI is Macaron's headline feature: the model doesn't just describe a UI, it **
 Both surfaces return an **identical `tool_result` shape**, so the model self-corrects the same way regardless of engine. Before returning, the handler runs `checkGenUI` — a TypeScript diagnose pass over the submitted module — and flips `ok: false` when the code has type errors, so the model gets actionable feedback instead of a silent broken preview.
 
 <Callout type="warn" title="Availability depends on the install form">
-  The full GenUI path — the injected `render_ui` stdio server on the Codex side, and the *semantic* TypeScript diagnostics inside `checkGenUI` — is present when the server runs from **source** (a repo checkout) or a **plugin** install, where `server/src/macaron-mcp-stdio.ts` and `web/src/macaron-vendor` exist. The published pkg.pr.new tarballs (`mcc@…` / `mcx@…`) currently bundle only `server/dist/index.js` + `web/dist`, so they ship neither file: on the Codex path the stdio helper can't be spawned, and `checkGenUI` falls back to compile / syntax / UnoCSS lint only (`serviceUnavailable`, `genui-check.ts`). The in-browser preview renderer still works from `web/dist` on every install form. Packaging those files into the tarball is tracked separately from this docs PR.
+  This describes the retained source application. Its TypeScript diagnostics and runtime share the six-component UI4A contract. The unified `macaron-artifacts` distribution has its own harness and UI4A pipeline; see [Packaging](/docs/architecture/packaging).
 </Callout>
 
 <Callout type="info" title="UI changes preview first — by convention">
@@ -30,7 +34,7 @@ Both surfaces return an **identical `tool_result` shape**, so the model self-cor
 
 ## The Live Renderer
 
-On the browser side, `web/src/macaron-vendor/StaticGenUIRenderer.tsx` (wrapped by the thin `GenuiPreview.tsx`) turns streamed TSX text into a mounted React tree. It builds on `partial-react` — a compiler + renderer that tolerates **incomplete** source, so each streamed chunk can re-render without waiting for the full module.
+On the browser side, `web/src/components/GenuiRenderer.tsx` connects the host import map to published `partial-react` and the shared frame-delivery implementation. It tolerates **incomplete** source, so each streamed chunk can render without waiting for the full module. The host shares the unified app's six lightweight UI4A components, uses UnoCSS `presetWind4` for utilities, and exposes Headless UI and Recharts directly for additional controls and charts.
 
 <Steps>
 <Step>
@@ -46,7 +50,7 @@ On the browser side, `web/src/macaron-vendor/StaticGenUIRenderer.tsx` (wrapped b
 <Step>
 ### Resolve imports
 
-An import-map resolver maps bare specifiers (`react`, `$macaron/ui`, charts, lucide, motion) to the locally-served shim modules, so `react` and friends resolve to the page's own copy rather than a bundled duplicate. A further guard (`ensureNativeReactImportMap`) exists to also pin React for third-party components pulled from an `esm.sh` fallback, but it is **not currently wired into the render path** — the esm.sh fallback route therefore has no active second-React protection yet.
+An import-map resolver maps bare specifiers (`react`, `$ui4a/ui`, `@headlessui/react`, `recharts`, `lucide-react`, and `motion/react`) to locally served shim modules. `$macaron/ui` aliases the same six UI4A exports. The host also installs a native import map so React externalized by the `esm.sh` fallback resolves to the page's own instance.
 </Step>
 <Step>
 ### Mount and cross-fade
@@ -57,10 +61,25 @@ The compiled module is mounted. In-place updates just re-render the live tree, b
 
 ## The Import Shims
 
-`web/public/genui-shim/*.mjs` provides the runtime modules the compiled TSX imports — `react.mjs`, `react-dom.mjs`, the JSX runtimes, `ui.mjs`, `charts.mjs`, `lucide.mjs`, `motion.mjs`, and `chat.mjs`. These are what the import map points bare specifiers at, so a model-authored `import { Card } from '$macaron/ui'` resolves without a build step in the browser.
+`web/public/genui-shim/*.mjs` connects generated imports to the host's React, UI4A, Headless UI, Recharts, Lucide, Motion, and chat modules. A model-authored `import { Card } from '$ui4a/ui'` resolves to the shared lightweight component implementation.
+
+The component contract is deliberately small:
+
+| Export | Use |
+| --- | --- |
+| `Button` | Native button props, `primary` / `secondary` / `ghost` / `danger` variants, and `sm` / `md` sizes |
+| `Field` | Native input props with a required `label` and optional `hint` |
+| `Card` | A framed div; compose headings and body content with native HTML |
+| `Badge` | An inline span for short status text |
+| `Tabs` | Headless UI tabs from `items: { id, label, children }[]`, with optional `value` and `onChange` |
+| `Disclosure` | Headless UI disclosure from `title`, `children`, and optional `defaultOpen` |
+
+Use native HTML and Wind4 utilities for layout, lists, tables, and metrics. Shiki supplies semantic colors to both the application and generated surfaces. Additional interactive controls come directly from `@headlessui/react`; charts come directly from `recharts` with an explicit container height.
+
+The retained host's chat actions remain `sendUserMessage` and `useAutoSend` from `$macaron/chat`. The unified app's scoped state and file capabilities are documented by its generated UI4A skill; they are not legacy chat-bridge APIs.
 
 ## The `genui-builder` Skill
 
-For agents driving the CLI rather than the WebUI, the bundled **`genui-builder`** skill (`skills/genui-builder/SKILL.md`) teaches the model to author streaming GenUI artifacts. It prefers the `render_ui` MCP tool when exposed, and falls back to a pinned `@genui/cli` (`bunx genui@…`) for `lint` / `check` / standalone export when it isn't.
+The bundled **`genui-builder`** skill (`skills/genui-builder/SKILL.md`) teaches the host's six-component contract and streaming authoring rules. It prefers the `render_ui` MCP tool when exposed. A pinned `@genui/cli` (`bunx genui@…`) remains available for standalone export, but its separate module registry does not validate this host's capabilities.
 
 Next: how the [Codex variant](/docs/architecture/codex) reuses all of this with a different engine.

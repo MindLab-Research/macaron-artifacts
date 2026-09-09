@@ -10,11 +10,11 @@ export function meta({}: Route.MetaArgs) {
 export default function NotFound() {
   return (
     <HomeLayout {...baseOptions()}>
-      <div className="p-4 flex flex-col items-center justify-center text-center flex-1">
-        <h1 className="text-xl font-bold mb-2">Not Found</h1>
-        <p className="text-fd-muted-foreground mb-4">This page could not be found.</p>
+      <div className="site:p-4 site:flex site:flex-col site:items-center site:justify-center site:text-center site:flex-1">
+        <h1 className="site:text-xl site:font-bold site:mb-2">Not Found</h1>
+        <p className="site:text-fd-muted-foreground site:mb-4">This page could not be found.</p>
         <Link
-          className="text-sm bg-fd-primary text-fd-primary-foreground rounded-full font-medium px-4 py-2.5"
+          className="site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-full site:font-medium site:px-4 site:py-2.5"
           to="/docs"
         >
           Back to Docs
