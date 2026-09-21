@@ -5,8 +5,7 @@
 @import "streamdown/styles.css";
 @import "katex/dist/katex.min.css";
 
-.md .katex-display, .ui4a-math-block { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 0.25rem; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 calc(100% - 2rem), transparent); }
-.md .katex-display::-webkit-scrollbar, .ui4a-math-block::-webkit-scrollbar { display: none; }
+.md .katex-display, .ui4a-math-block .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 0.25rem; }
 .ui4a-math-block { display: block; min-width: 0; }
 .ui4a-math-block .katex-display { margin: 0; }
 .ui4a-chart { color: var(--muted); font-size: 12px; }
@@ -216,28 +215,34 @@ button:is(.pressable, .btn-icon):focus-visible:active { scale: none; }
   display: none;
 }
 
-/* 横向滚动区，滚动条藏起来、右缘改用渐隐来说明「右边还有」——两件事必须一起，单独藏掉滚动条
+/* 横向滚动区，滚动条藏起来、截断的边缘改用渐隐来说明「还有内容」——两件事必须一起，单独藏掉滚动条
    就没有任何东西告诉用户还能滚（实测一条 1303px 的代码行在 527px 的框里，看上去就是被截断的
    死内容）。`animation-timeline` 让渐隐在滚到底时自己消失，纯 CSS，没有滚动监听。 */
 .scroll-x {
   overflow-x: auto;
   scrollbar-width: none;
-  animation: fade-x-end linear;
-  animation-timeline: scroll(self inline);
 }
 .scroll-x::-webkit-scrollbar {
   display: none;
 }
-/* 渐隐带只在最后一段路里收掉：等距插值的话，一个只能滚几十像素的框全程都糊着右边一截。
-   `to` 那帧的 `100%` 是把渐变的起点推到最右 —— 等价于没有渐隐，但仍是同一个可插值的值。 */
-@keyframes fade-x-end {
-  from,
-  85% {
-    mask-image: linear-gradient(90deg, #000 calc(100% - 2rem), transparent);
+/* Animate lengths, since mask-image gradients interpolate discretely in Chromium. */
+@property --scroll-fade-start { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --scroll-fade-end { syntax: '<length>'; inherits: false; initial-value: 0px; }
+/* Keep formula scrollbars as the fallback; an inactive timeline leaves both fade lengths at zero. */
+@supports (animation-timeline: scroll(self inline)) {
+  .scroll-x, .md .katex-display, .ui4a-math-block .katex-display {
+    scrollbar-width: none;
+    animation: fade-x-edges linear;
+    animation-timeline: scroll(self inline);
+    mask-image: linear-gradient(90deg, transparent, #000 var(--scroll-fade-start), #000 calc(100% - var(--scroll-fade-end)), transparent);
   }
-  to {
-    mask-image: linear-gradient(90deg, #000 100%, transparent);
-  }
+  .md .katex-display::-webkit-scrollbar, .ui4a-math-block .katex-display::-webkit-scrollbar { display: none; }
+}
+/* Coincident stops at 0/100% leave a fully visible edge, including non-overflowing formulas. */
+@keyframes fade-x-edges {
+  from { --scroll-fade-start: 0px; --scroll-fade-end: 2rem; }
+  15%, 85% { --scroll-fade-start: 2rem; --scroll-fade-end: 2rem; }
+  to { --scroll-fade-start: 2rem; --scroll-fade-end: 0px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
