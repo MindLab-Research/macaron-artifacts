@@ -1,0 +1,1 @@
+{"name":"@macaron/openclaw-metadata-gate","version":"0.1.0","type":"module","main":"./index.mjs","openclaw":{"extensions":["./index.mjs"]},"peerDependencies":{"openclaw":">=2026.9.3"}}

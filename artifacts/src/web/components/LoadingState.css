@@ -1,0 +1,16 @@
+/* Beautiful UI Drive loader, adapted to the host palette. See /third-party-licenses/beautiful-ui.txt. */
+.loading-state { display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%; min-height: 20px; color: var(--muted); }
+.loading-state-grid { display: grid; grid-template-columns: repeat(3, 4px); gap: 1.5px; flex-shrink: 0; }
+.loading-state-grid > span { width: 4px; height: 4px; border-radius: 1px; background: var(--fg); opacity: 0.15; animation: loading-pixel 650ms ease-in-out infinite; }
+.loading-state-label { min-width: 0; font-size: 13px; font-weight: 500; background: linear-gradient(90deg, var(--muted) 35%, var(--fg) 50%, var(--muted) 65%) 150% center / 200% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; animation: loading-shimmer 1.4s linear infinite; }
+.loading-state-elapsed { flex-shrink: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@keyframes loading-pixel { 0%, 62%, 100% { opacity: 0.15; } 18%, 42% { opacity: 1; } }
+@keyframes loading-shimmer { from { background-position: 150% center; } to { background-position: -50% center; } }
+@media (prefers-reduced-motion: reduce) {
+  .loading-state-grid > span { animation: none; opacity: 0.5; }
+  .loading-state-label { animation: none; background: none; color: var(--muted); }
+}
+@media (forced-colors: active) {
+  .loading-state-grid > span { background: CanvasText; }
+  .loading-state-label { animation: none; background: none; color: CanvasText; }
+}

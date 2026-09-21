@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler } from "react";
 import { ProgressiveFade } from "./ProgressiveFade";
 import { useTailFollow } from "./useTailFollow";
 
@@ -46,18 +46,16 @@ const MASK = `linear-gradient(180deg,transparent,#000 calc(var(--fade-top) * ${F
 export function Collapsible({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
+  const controls = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<HTMLButtonElement | null>(null);
+  const contentId = useId();
+  const [keyboard, setKeyboard] = useState(false);
   const [height, setHeight] = useState(0);
   const [open, setOpen] = useState(false);
-  /**
-   * 高度过渡只服务于「用户点了展开/收起」这一次跳变。
-   *
-   * 常开着的话，流式增长每帧都会把 `height` 换成新值、于是每帧重启一次 300ms 缓动 —— 目标一直在跑，
-   * 过渡永远追不上（实测滞后单调涨到 497px），看着就是一抖一抖地往上蹭。内容自己长高本来就是连续的，
-   * 不需要补间。
-   */
-  const [toggling, setToggling] = useState(false);
-  const toggle = (next: boolean) => {
-    setToggling(true);
+  const toggle = (next: boolean, event: React.MouseEvent<HTMLButtonElement>) => {
+    const keyboard = event.detail === 0;
+    pendingFocus.current = document.activeElement === event.currentTarget ? event.currentTarget : null;
+    setKeyboard(keyboard);
     setOpen(next);
   };
   const edges = useTailFollow(scroller, height, RAMP);
@@ -73,21 +71,35 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
 
   const overflowing = height > CAP;
   const collapsed = overflowing && !open;
+  // Edge measurements lag the height change by a frame. Keep a usable expansion target throughout that gap.
+  const fallbackExpand = collapsed && edges.top <= REVEAL && edges.bottom <= REVEAL;
+  useLayoutEffect(() => {
+    const previous = pendingFocus.current;
+    if (!previous) return;
+    pendingFocus.current = null;
+    // The activated control is now hidden. Move only its focus, never focus owned by another control.
+    if (document.activeElement !== previous && document.activeElement !== document.body) return;
+    const next = controls.current?.querySelector<HTMLButtonElement>(':scope > button[data-export-toggle]:not([hidden])');
+    if (fallbackExpand && next) pendingFocus.current = next;
+    (next ?? scroller.current)?.focus({ preventScroll: !keyboard });
+  }, [open, keyboard, fallbackExpand, edges.top, edges.bottom]);
   return (
     <div className={className}>
       {/* 模糊层和展开开关都贴着**窗口**的边，所以定位基准要在这一层。
           两个渐隐强度在这里落地并补间，底下的蒙版和模糊层都是从它们算出来的（继承），因此永远同步 */}
-      <div className="relative" style={{ "--fade-top": collapsed ? edges.top : 0, "--fade-bottom": collapsed ? edges.bottom : 0, transition: `--fade-top ${EASE}, --fade-bottom ${EASE}` } as React.CSSProperties}>
+      <div ref={controls} data-export-collapsible data-keyboard={keyboard || undefined} onPointerDownCapture={() => setKeyboard(false)} onWheelCapture={() => setKeyboard(false)} data-export-open={open} data-export-cap={CAP} data-export-ramp={RAMP} data-export-reveal={REVEAL} className="relative" style={{ "--fade-top": collapsed ? edges.top : 0, "--fade-bottom": collapsed ? edges.bottom : 0, transition: `--fade-top ${EASE}, --fade-bottom ${EASE}` } as React.CSSProperties}>
         {/* 高度给到具体像素而不是 max-height：收起态是常量，展开态跟着测量值走。
             `overflow-y-auto` 而不是 hidden —— 跟随尾部靠的就是真的滚动，用户也能自己滚回去看。
             滚动条一律藏起来：蒙版是盖在整个窗口上的，会把滚动条一起糊掉，露着比藏着更难看 */}
         <div
           ref={scroller}
+          id={contentId} tabIndex={collapsed ? 0 : -1}
+          data-export-scroller
           className="no-scrollbar overflow-y-auto"
-          onTransitionEnd={(event) => event.propertyName === "height" && setToggling(false)}
-          style={{ height: collapsed ? CAP : height || undefined, transition: toggling ? "height 300ms cubic-bezier(0.32,0.72,0,1)" : undefined, maskImage: MASK, WebkitMaskImage: MASK }}
+          // Settle layout once; interpolating the height relayouts every following message on each frame.
+          style={{ height: collapsed ? CAP : height || undefined, maskImage: MASK, WebkitMaskImage: MASK }}
         >
-          <div ref={inner}>{children}</div>
+          <div ref={inner} data-export-content>{children}</div>
         </div>
         {/* 强度为 0 时这两层是零高度的空盒子，所以常挂着也不额外合成 —— 但必须常挂着，
             卸掉重挂就没有过渡可言了 */}
@@ -95,20 +107,21 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
         <ProgressiveFade side="bottom" size={FADE} step={BLUR_STEP} />
         {/* 开关浮在被截断的那条边上，居中。哪条边藏了东西就出现在哪条边 —— 跟随尾部时藏的是上面，
             按钮也就只出现在顶上。一律自带底色：它压着的是代码，而渐隐带最多只糊掉一部分 */}
-        {collapsed && edges.top > REVEAL ? <Toggle side="top" label="↑ 展开" fade onClick={() => toggle(true)} /> : null}
-        {collapsed && edges.bottom > REVEAL ? <Toggle side="bottom" label="展开 ↓" fade onClick={() => toggle(true)} /> : null}
-        {overflowing && !collapsed ? <Toggle side="bottom" label="收起 ↑" onClick={() => toggle(false)} /> : null}
+        <Toggle controls={contentId} expanded={!collapsed} side="top" label="↑ 展开" fade hidden={!(collapsed && edges.top > REVEAL)} onClick={event => toggle(true, event)} />
+        <Toggle controls={contentId} expanded={!collapsed} side="bottom" label="展开 ↓" fade fallback={fallbackExpand} hidden={!(collapsed && edges.bottom > REVEAL)} onClick={event => toggle(true, event)} />
+        <Toggle controls={contentId} expanded={!collapsed} side="bottom" label="收起 ↑" hidden={!(overflowing && !collapsed)} onClick={event => toggle(false, event)} />
       </div>
     </div>
   );
 }
 
-function Toggle({ side, label, onClick, fade }: { side: "top" | "bottom"; label: string; onClick: () => void; fade?: boolean }) {
+function Toggle({ side, label, onClick, fade, hidden, controls, expanded, fallback = false }: { side: "top" | "bottom"; label: string; onClick: MouseEventHandler<HTMLButtonElement>; fade?: boolean; hidden: boolean; controls: string; expanded: boolean; fallback?: boolean }) {
   return (
     <button
+      type="button" hidden={hidden && !fallback} data-export-fallback={fallback || undefined} aria-controls={controls} aria-expanded={expanded} data-export-toggle={fade ? side : 'collapse'}
       onClick={onClick}
       // `inset-x-0` + `mx-auto w-fit` 才是绝对定位下的水平居中；只给 left-1/2 会连按钮自身宽度一起偏
-      className={`interactive absolute inset-x-0 z-10 mx-auto w-fit rounded-full bg-surface-3/100 px-2 py-0.5 text-[11px] text-muted shadow-sm hover:text-fg ${side === "top" ? "top-1.5" : "bottom-1.5"}`}
+      className={`interactive absolute inset-x-0 z-content-overlay mx-auto w-fit rounded-full border border-secondary-border bg-secondary px-2 py-0.5 text-[11px] text-secondary-fg hover:bg-secondary-hover ${side === "top" ? "top-1.5" : "bottom-1.5"}`}
       style={fade ? { opacity: `calc((var(--fade-${side}) - ${REVEAL}) * ${REVEAL_RAMP})` } : undefined}
     >
       {label}

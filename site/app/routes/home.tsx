@@ -20,7 +20,7 @@ function Command({ code }: { code: string }) {
 }
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: 'Macaron Artifacts' }, { name: 'description', content: 'One local WebUI for Claude Code, Codex, OpenCode, and pi, with streaming conversations, generated UI, and shared Shiki themes.' }];
+  return [{ title: 'Macaron Artifacts' }, { name: 'description', content: 'One local WebUI for six coding harnesses, streaming conversations, generated UI, and shared Shiki themes.' }];
 }
 
 // The package name and CLI stay the same whichever harness a conversation uses.
@@ -31,9 +31,9 @@ export default function Home() {
     <HomeLayout {...baseOptions()}>
       <div className="site:flex site:flex-col site:items-center site:flex-1 site:px-4">
         <section className="site:flex site:flex-col site:items-center site:text-center site:max-w-2xl site:pt-20 site:pb-16">
-          <span className="site:inline-flex site:items-center site:gap-1.5 site:rounded-full site:border site:px-3 site:py-1 site:text-xs site:text-fd-muted-foreground site:mb-6"><Terminal className="site:size-3.5" /> Claude Code, Codex, OpenCode &amp; pi</span>
+          <span className="site:inline-flex site:items-center site:gap-1.5 site:rounded-full site:border site:px-3 site:py-1 site:text-xs site:text-fd-muted-foreground site:mb-6"><Terminal className="site:size-3.5" /> Claude Code, Codex, OpenCode, pi, Hermes &amp; OpenClaw</span>
           <h1 className="site:text-4xl site:sm:text-5xl site:font-bold site:mb-4">Macaron Artifacts</h1>
-          <p className="site:text-fd-muted-foreground site:text-lg site:mb-8">One local WebUI for your coding harnesses. Stream conversations and interactive UI with Claude Code, Codex, OpenCode, or pi.</p>
+          <p className="site:text-fd-muted-foreground site:text-lg site:mb-8">One local WebUI for your coding harnesses. Stream conversations and interactive UI with Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw.</p>
           <div className="site:flex site:flex-wrap site:items-center site:justify-center site:gap-3">
             <Link className="site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-full site:font-medium site:px-5 site:py-2.5 site:transition-opacity site:hovered:opacity-90" to="/docs" onClick={() => track('cta_click', { target: 'docs', section: 'hero' })}>Read the Docs</Link>
             <Link className="site:text-sm site:border site:rounded-full site:font-medium site:px-5 site:py-2.5 site:transition-colors site:hovered:bg-fd-accent site:hovered:text-fd-accent-foreground" to="/docs/usage" onClick={() => track('cta_click', { target: 'quick-start', section: 'hero' })}>Quick Start</Link>
@@ -52,9 +52,9 @@ export default function Home() {
         <section className="site:w-full site:max-w-5xl site:pb-24">
           <div className="site:mb-6"><h2 className="site:text-2xl site:font-semibold site:mb-1">Run Agents With a UI</h2><p className="site:text-fd-muted-foreground">The same conversation interface, whichever harness you choose.</p></div>
           <Cards className="site:grid-cols-1 site:sm:grid-cols-3">
-            <Card icon={<MonitorPlay />} title="Shared Interface" href="/docs/usage" onClick={() => track('cta_click', { target: 'shared-interface', section: 'run-with-ui' })}>Choose Claude Code, Codex, OpenCode, or pi per conversation. Workspaces, sessions, and approvals stay in one app.</Card>
+            <Card icon={<MonitorPlay />} title="Shared Interface" href="/docs/usage" onClick={() => track('cta_click', { target: 'shared-interface', section: 'run-with-ui' })}>Choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw per conversation. Workspaces, sessions, and approvals stay in one app.</Card>
             <Card icon={<MessagesSquare />} title="Live Conversations" href="/docs/usage" onClick={() => track('cta_click', { target: 'live-chat', section: 'run-with-ui' })}>Follow native text, reasoning, and tool events as they arrive. Reconnect to active turns after refreshing.</Card>
-            <Card icon={<SlidersHorizontal />} title="Native Configuration" href="/docs/usage" onClick={() => track('cta_click', { target: 'native-configuration', section: 'run-with-ui' })}>Use your harness's existing login and settings. Choose a model when starting a conversation.</Card>
+            <Card icon={<SlidersHorizontal />} title="Native Configuration" href="/docs/usage" onClick={() => track('cta_click', { target: 'native-configuration', section: 'run-with-ui' })}>Use each harness's existing login, gateway, and settings, or select a Profile and model when starting a conversation.</Card>
           </Cards>
           <div className="site:mt-12 site:mb-6"><h2 className="site:text-2xl site:font-semibold site:mb-1">Generated UI, Two Ways</h2><p className="site:text-fd-muted-foreground">Small interactive answers in the conversation, persistent tools in Canvas.</p></div>
           <Cards>

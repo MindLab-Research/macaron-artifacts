@@ -13,7 +13,7 @@ function parseColor(value: unknown): Color | undefined {
   return { rgb: [0, 2, 4].map(index => Number.parseInt(full.slice(index, index + 2), 16)), alpha: full.length === 8 ? Number.parseInt(full.slice(6), 16) / 255 : 1 };
 }
 
-/** Flatten editor alpha colors once so a token has the same contrast on every host surface. */
+/** Flatten alpha against the actual owning surface before measuring text contrast. */
 function composite(value: unknown, background: string): string {
   const color = parseColor(value);
   if (!color) return background;
@@ -25,6 +25,12 @@ function mix(color: string, target: string, amount: number): string {
   const start = parseColor(color)!.rgb;
   const end = parseColor(target)!.rgb;
   return hex(start.map((channel, index) => channel + (end[index] - channel) * amount));
+}
+
+/** Resting controls follow VS Code's quiet 15% secondary border; focus and HC keep the native token. */
+function restingBorder(value: unknown, background: string, amount = .18): string {
+  const color = parseColor(value);
+  return color?.alpha === 0 ? 'transparent' : color ? mix(background, composite(value, background), amount) : 'transparent';
 }
 
 function luminance(color: string): number {
@@ -67,52 +73,110 @@ function buttonHover(background: string, foreground: string, proposed = mix(back
   return stronger !== background ? stronger : readable(mix(background, foreground, .08), [foreground]);
 }
 
+export function readableSyntaxTheme(theme: ThemeRegistration): ThemeRegistration {
+  const background = themePalette(theme, theme.type === 'dark').code;
+  const adjusted = new Map<string, string>();
+  const color = (value: string | undefined) => {
+    if (!value || !parseColor(value)) return value;
+    if (!adjusted.has(value)) adjusted.set(value, readable(composite(value, background), [background]));
+    return adjusted.get(value)!;
+  };
+  // Keep scopes and hues; only raise insufficient text contrast. The cached native theme remains untouched for UI tokens and previews.
+  const settings = (items: ThemeRegistration['tokenColors']) => items?.map(item => ({ ...item, settings: { ...item.settings, ...(item.settings?.foreground ? { foreground: color(item.settings.foreground) } : {}) } }));
+  return { ...theme, fg: color(theme.fg), colors: { ...theme.colors, ...(theme.colors?.['editor.foreground'] ? { 'editor.foreground': color(theme.colors['editor.foreground'])! } : {}) }, tokenColors: settings(theme.tokenColors), ...(theme.settings ? { settings: settings(theme.settings) } : {}) };
+}
+
 export function themePalette(theme: ThemeRegistration, dark: boolean): Record<string, string> {
   const colors = theme.colors ?? {};
-  // Shipped themes also contain null, empty strings and even arrays despite the declared color type.
+  // Themes contain invalid and explicitly transparent values; only absence should invoke a fallback.
   const pick = (...values: unknown[]) => values.find(value => parseColor(value)) as string | undefined;
+  const decoration = (...values: unknown[]) => (pick(...values) ?? 'transparent').toLowerCase();
   const surface = composite(pick(colors['editor.background'], theme.bg), dark ? '#0e0e11' : WHITE);
   const baseFg = readable(composite(pick(colors['editor.foreground'], theme.fg, colors.foreground, dark ? '#f2f2f5' : '#16161a'), surface), [surface]);
-  const ink = contrastRatio(surface, BLACK) > contrastRatio(surface, WHITE) ? BLACK : WHITE;
-  const readableSurface = (value: string) => adjustToward(value, surface, candidate => contrastRatio(ink, candidate) >= 4.5).color;
-  const surface2 = readableSurface(composite(pick(colors['editorWidget.background'], mix(surface, baseFg, .04)), surface));
-  let hover = composite(pick(colors['list.hoverBackground'], mix(surface2, baseFg, .06)), surface2);
-  if (Math.min(contrastRatio(hover, surface), contrastRatio(hover, surface2)) < 1.04) hover = mix(surface2, baseFg, .08);
-  const surface3 = readableSurface(hover);
-  const surfaces = [surface, surface2, surface3];
-  const fg = readable(baseFg, surfaces, 4.5, ink);
-  const foreground = (value: unknown, minimum = 4.5) => readable(composite(value, surface), surfaces, minimum, fg);
-  const muted = foreground(pick(colors.descriptionForeground, colors['input.placeholderForeground'], mix(surface, fg, .62)));
-  const inputBg = readableSurface(composite(pick(colors['input.background'], surface2), surface));
-  const inputFg = readable(composite(pick(colors['input.foreground'], fg), inputBg), [inputBg]);
-  const dropdownBg = readableSurface(composite(pick(colors['dropdown.background'], inputBg), surface));
-  const dropdownFg = readable(composite(pick(colors['dropdown.foreground'], fg), dropdownBg), [dropdownBg]);
+  const softFill = (background: string, ink: string) => adjustToward(mix(background, ink, .035), background, candidate => contrastRatio(ink, candidate) >= 4.5).color;
+  const surface2 = softFill(surface, baseFg);
+  const fg = readable(baseFg, [surface, surface2]);
+  const foreground = (value: unknown, minimum = 4.5) => readable(composite(value, surface), [surface, surface2], minimum, fg);
+  const muted = foreground(pick(colors.descriptionForeground, mix(surface, fg, .66)));
+  const contrast = decoration(colors.contrastBorder), contrastActive = decoration(colors.contrastActiveBorder, colors.contrastBorder);
+  const focus = (background: string, ink: string) => readable(composite(pick(colors.focusBorder, colors.contrastActiveBorder, colors['textLink.foreground'], ink), background), [background], 3, ink);
+  const pair = (background: unknown, ink: unknown, parent = surface, fallback = fg) => {
+    const bg = composite(background, parent);
+    return { bg, fg: readable(composite(pick(ink, fallback), bg), [bg], 4.5, fallback) };
+  };
+  const inputColors = (background: string, ink: string) => {
+    const input = pair(pick(colors['input.background'], mix(background, ink, .06)), colors['input.foreground'], background, ink);
+    const dropdown = pair(pick(colors['dropdown.background'], input.bg), colors['dropdown.foreground'], background, input.fg);
+    const explicitDropdownBorder = pick(colors['dropdown.border']);
+    const dropdownBorder = decoration(explicitDropdownBorder, colors.contrastBorder, luminance(dropdown.bg) > .5 ? mix(dropdown.bg, dropdown.fg, .15) : 'transparent');
+    return {
+      'input-bg': input.bg, 'input-fg': input.fg, 'input-border': decoration(colors['input.border'], colors.contrastBorder),
+      'input-placeholder': readable(composite(pick(colors['input.placeholderForeground'], mix(input.bg, input.fg, .66)), input.bg), [input.bg]), 'input-focus': focus(input.bg, input.fg),
+      'dropdown-bg': dropdown.bg, 'dropdown-fg': dropdown.fg,
+      'dropdown-border': dropdownBorder, 'dropdown-border-rest': explicitDropdownBorder ? restingBorder(explicitDropdownBorder, dropdown.bg) : dropdownBorder, 'dropdown-focus': focus(dropdown.bg, dropdown.fg),
+    };
+  };
+  const hover = pair(pick(colors['list.hoverBackground'], mix(surface, fg, .06)), colors['list.hoverForeground']);
   let accent = composite(pick(colors['button.background'], colors['textLink.foreground'], fg), surface);
   const defaultLabel = contrastRatio(accent, fg) > contrastRatio(accent, surface) ? fg : surface;
   const accentFg = composite(pick(colors['button.foreground'], defaultLabel), accent);
-  // Keep the theme's intended button label (notably GitHub's white); adjust its background instead.
+  // Keep the intended button label (notably GitHub's white); correct the fill if needed.
   accent = readable(accent, [accentFg]);
   const accentHover = buttonHover(accent, accentFg, composite(pick(colors['button.hoverBackground'], mix(accent, accentFg, .08)), surface));
+  const secondary = pair(pick(colors['button.secondaryBackground'], mix(surface, fg, .09)), colors['button.secondaryForeground']);
+  const explicitSecondaryBorder = pick(colors['button.secondaryBorder'], colors['button.border']);
+  const secondaryHover = readable(composite(pick(colors['button.secondaryHoverBackground'], mix(secondary.bg, secondary.fg, .08)), surface), [secondary.fg]);
+  // Shiki's syntax colors target editor.background. Markdown's code container can have its own fill without repainting that syntax plane.
+  const code = pair(surface, fg), codeBlock = pair(pick(colors['textCodeBlock.background'], surface2), fg);
+  const inlineCode = pair(pick(colors['textPreformat.background'], mix(surface, fg, .075)), colors['textPreformat.foreground']);
+  const bubble = pair(pick(colors['chat.requestBubbleBackground'], mix(surface, fg, .07)), fg);
+  const status = pair(pick(colors['chat.statusBackground'], mix(surface, fg, .07)), fg);
+  const tab = pair(pick(colors['tab.activeBackground'], surface), colors['tab.activeForeground']);
   const danger = foreground(pick(colors.errorForeground, colors['editorError.foreground'], colors['terminal.ansiRed'], dark ? '#ff6b83' : '#d9435f'));
   const dangerBg = readable(danger, [WHITE]);
   const palette: Record<string, string> = {
-    surface, 'surface-2': surface2, 'surface-3': surface3, fg, muted,
-    border: composite(pick(colors['panel.border'], colors['widget.border'], mix(surface, fg, .14)), surface),
-    // VS Code uses optional input borders, component-specific dropdown borders and low-alpha radio borders.
-    // Resting decoration must not inherit focus/contrastBorder or the text contrast correction.
-    'control-border': composite(pick(colors['radio.inactiveBorder'], colors['button.secondaryBorder'], mix(surface, fg, .15)), surface),
-    'input-bg': inputBg, 'input-fg': inputFg,
-    'input-border': composite(pick(colors['input.border']), inputBg),
-    'input-placeholder': readable(composite(pick(colors['input.placeholderForeground'], muted), inputBg), [inputBg]),
-    'dropdown-bg': dropdownBg, 'dropdown-fg': dropdownFg,
-    'dropdown-border': composite(pick(colors['dropdown.border'], dark ? dropdownBg : mix(dropdownBg, dropdownFg, .15)), dropdownBg),
+    surface, 'surface-2': surface2, 'surface-3': hover.bg, 'hover-fg': hover.fg, fg, muted,
+    // panel.border is a structural pane boundary, not a universal outline for every card and row.
+    border: decoration(colors.contrastBorder, mix(surface, fg, .12)), contrast, 'contrast-active': contrastActive,
+    'control-border': decoration(colors['radio.inactiveBorder'], colors['button.secondaryBorder'], colors.contrastBorder, mix(surface, fg, .15)),
+    ...inputColors(surface, fg),
     accent, 'accent-fg': accentFg, 'accent-hover': accentHover,
-    link: foreground(pick(colors['textLink.foreground'], colors['textLink.activeForeground'], accent)),
-    focus: readable(composite(pick(colors.focusBorder, colors['textLink.foreground'], accent), surface), [...surfaces, inputBg, dropdownBg], 3, fg),
+    secondary: secondary.bg, 'secondary-fg': secondary.fg, 'secondary-hover': secondaryHover, 'secondary-border': decoration(explicitSecondaryBorder, colors.contrastBorder), 'secondary-border-rest': explicitSecondaryBorder ? restingBorder(explicitSecondaryBorder, secondary.bg) : decoration(colors.contrastBorder),
+    code: code.bg, 'code-fg': code.fg, 'code-muted': readable(composite(muted, code.bg), [code.bg]), 'code-focus': focus(code.bg, code.fg), 'code-block': codeBlock.bg, 'code-block-fg': codeBlock.fg,
+    'inline-code': inlineCode.bg, 'inline-code-fg': inlineCode.fg, bubble: bubble.bg, 'bubble-fg': bubble.fg,
+    'bubble-muted': readable(composite(muted, bubble.bg), [bubble.bg]), 'bubble-link': readable(composite(pick(colors['textLink.foreground'], accent), bubble.bg), [bubble.bg]), 'bubble-focus': focus(bubble.bg, bubble.fg),
+    status: status.bg, 'status-fg': status.fg,
+    'tab-active': tab.bg, 'tab-active-fg': tab.fg,
+    link: foreground(pick(colors['textLink.foreground'], colors['textLink.activeForeground'], accent)), focus: focus(surface, fg),
     danger, 'danger-bg': dangerBg, 'danger-fg': WHITE, 'danger-hover': buttonHover(dangerBg, WHITE),
     success: foreground(pick(colors['gitDecoration.addedResourceForeground'], colors['terminal.ansiGreen'], dark ? '#34d399' : '#15803d')),
     warn: foreground(pick(colors['editorWarning.foreground'], colors['terminal.ansiYellow'], dark ? '#fbbf24' : '#a16207')),
+    // Shadows keep their alpha; compositing them into editor.background would paint an opaque fringe.
+    'widget-shadow': decoration(colors['widget.shadow'], dark ? '#0000005c' : '#00000029'),
   };
+  const contexts = {
+    sidebar: { background: pick(colors['sideBar.background'], surface2), foreground: pick(colors['sideBar.foreground'], colors.foreground, fg), border: colors['sideBar.border'] },
+    titlebar: { background: pick(colors['titleBar.activeBackground'], surface), foreground: pick(colors['titleBar.activeForeground'], colors.foreground, fg), border: colors['titleBar.border'] },
+    panel: { background: pick(colors['panel.background'], surface), foreground: pick(colors['panel.foreground'], fg), border: pick(colors['panel.border'], colors['editorGroup.border'], palette.border) },
+    // Editor widgets (dialogs, command surfaces) use their dedicated 20% border token; widget.border is an explicit fallback for themes that define it.
+    widget: { background: pick(colors['editorWidget.background'], surface2), foreground: pick(colors['editorWidget.foreground'], colors.foreground, fg), border: pick(colors['editorWidget.border'], colors['widget.border']) },
+    menu: { background: pick(colors['menu.background'], colors['dropdown.background'], colors['editorWidget.background'], surface2), foreground: pick(colors['menu.foreground'], colors['dropdown.foreground'], colors.foreground, fg), border: colors['menu.border'] },
+  };
+  for (const [name, values] of Object.entries(contexts)) {
+    const role = pair(values.background, values.foreground);
+    const fill = softFill(role.bg, role.fg), ink = role.fg;
+    const selection = name === 'menu';
+    const hovered = pair(selection ? pick(colors['menu.selectionBackground'], colors['list.activeSelectionBackground'], mix(role.bg, ink, .08)) : pick(name === 'titlebar' ? colors['toolbar.hoverBackground'] : undefined, colors['list.hoverBackground'], mix(role.bg, ink, .06)), selection ? pick(colors['menu.selectionForeground'], colors['list.activeSelectionForeground'], ink) : pick(colors['list.hoverForeground'], ink), role.bg, ink);
+    const entries = {
+      bg: role.bg, fg: ink, fill, muted: readable(mix(role.bg, ink, .68), [role.bg, fill], 4.5, ink), hover: hovered.bg, 'hover-fg': hovered.fg,
+      focus: focus(role.bg, ink), divider: decoration(colors.contrastBorder, mix(role.bg, ink, .12)), border: decoration(values.border, colors.contrastBorder),
+      danger: readable(composite(pick(colors.errorForeground, danger), role.bg), [role.bg, fill]), ...inputColors(role.bg, ink),
+    };
+    for (const [key, value] of Object.entries(entries)) palette[`${name}-${key}`] = value;
+  }
+  const inactive = pick(colors['list.inactiveSelectionBackground']);
+  const selected = pair(pick(inactive, colors['list.activeSelectionBackground'], palette['sidebar-hover']), pick(colors['list.inactiveSelectionForeground'], inactive ? undefined : colors['list.activeSelectionForeground'], palette['sidebar-fg']), palette['sidebar-bg'], palette['sidebar-fg']);
+  palette['sidebar-selection'] = selected.bg; palette['sidebar-selection-fg'] = selected.fg;
   const series = ['blue', 'yellow', 'green', 'red', 'purple', 'cyan'];
   const terminal = ['Blue', 'Yellow', 'Green', 'Red', 'Magenta', 'Cyan'];
   const defaults = dark ? ['#60a5fa', '#fbbf24', '#34d399', '#f472b6', '#a78bfa', '#2dd4bf'] : ['#3b82f6', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6', '#14b8a6'];

@@ -15,8 +15,9 @@ export function relativeUi4aPath(specifier: string, filename: string): string {
 }
 
 import { apiUrl, connectionHeaders } from '../chat/connection';
+import { authenticatedFetch } from '../chat/auth';
 
-export function createFileClient(sessionId: string, fetcher: typeof fetch = fetch) {
+export function createFileClient(sessionId: string, fetcher: typeof authenticatedFetch = authenticatedFetch) {
   const url = (path: string) => apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(ui4aPath(path))}`);
   const checked = async (response: Response, path: string) => {
     if (!response.ok) {

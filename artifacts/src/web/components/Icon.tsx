@@ -25,6 +25,7 @@ const ICON_PATHS = {
   panelLeft: "M3 3h18v18H3zM9 3v18",
   sliders: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   ellipsis: "M12 12h.01M19 12h.01M5 12h.01",
+  logOut: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

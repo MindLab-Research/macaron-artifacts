@@ -13,13 +13,15 @@ type NativeOverride = { revision: string; authMode?: ProfileConfig['authMode'] }
 type ProfileData = { version: 1; profiles: StoredProfile[]; credentials: Record<string, Credentials>; native: Record<string, NativeOverride>; pendingNative?: Record<string, true> };
 type NativeProfiles = { list: typeof listCodexProfiles; save: typeof saveCodexProfile; remove: typeof deleteCodexProfile; resolve: typeof resolveCodexProfile; defaults?: typeof resolveCodexDefaultProfile };
 const nativeProfiles: NativeProfiles = { list: listCodexProfiles, save: saveCodexProfile, remove: deleteCodexProfile, resolve: resolveCodexProfile, defaults: resolveCodexDefaultProfile };
-const harnesses: HarnessId[] = ['claude-code', 'codex', 'opencode', 'pi'];
+const harnesses: HarnessId[] = ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'openclaw'];
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const fields: Record<HarnessId, string[]> = {
   'claude-code': ['model', 'subagentModel', 'effort', 'baseUrl', 'authMode', 'forceSubagentModel', 'modelAliases', 'fineGrainedToolStreaming'],
   codex: ['model', 'subagentModel', 'effort', 'subagentEffort', 'provider', 'baseUrl', 'authMode', 'features'],
   opencode: ['model', 'provider', 'baseUrl', 'authMode', 'agent', 'variant', 'agentModels'],
   pi: ['model', 'provider', 'baseUrl', 'authMode', 'effort'],
+  hermes: ['model', 'effort', 'gatewayUrl', 'nativeProfile', 'authMode'],
+  openclaw: ['model', 'effort', 'gatewayUrl', 'nativeProfile', 'agent', 'authMode'],
 };
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }); };
 const revision = () => crypto.randomUUID();
@@ -53,7 +55,13 @@ export function validateProfileInput(value: unknown): ProfileInput {
       config[key] = Object.fromEntries(entries.filter(([, item]) => item !== ''));
     } else config[key] = string(entry, key);
   }
-  if (config.authMode && !['inherit', 'api-key', ...(harness === 'claude-code' ? ['auth-token'] : [])].includes(String(config.authMode))) return fail('不支持的认证方式');
+  const gatewayHarness = harness === 'hermes' || harness === 'openclaw';
+  if (config.authMode && !(gatewayHarness ? ['inherit', 'auth-token'] : ['inherit', 'api-key', ...(harness === 'claude-code' ? ['auth-token'] : [])]).includes(String(config.authMode))) return fail('不支持的认证方式');
+  if (config.nativeProfile && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(String(config.nativeProfile))) return fail('原生 Profile 名称无效');
+  if (config.gatewayUrl) {
+    let url: URL; try { url = new URL(String(config.gatewayUrl)); } catch { return fail('Gateway 地址必须是完整 URL'); }
+    if (!['ws:', 'wss:', ...(harness === 'hermes' ? ['http:', 'https:'] : [])].includes(url.protocol) || url.username || url.password || url.search || url.hash) return fail('Gateway 地址不应包含凭据、查询参数或片段');
+  }
   if (config.baseUrl) {
     let url: URL; try { url = new URL(String(config.baseUrl)); } catch { return fail('Base URL 必须是完整的 HTTP 或 HTTPS 地址'); }
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return fail('Base URL 不应包含认证信息，请使用凭据字段');
@@ -65,7 +73,8 @@ export function validateProfileInput(value: unknown): ProfileInput {
     if (!record(value.credentials)) return fail('凭据格式无效');
     for (const [key, item] of Object.entries(value.credentials)) {
       if (key !== 'apiKey' && key !== 'authToken') return fail('不支持的凭据字段');
-      if (key === 'authToken' && harness !== 'claude-code') return fail('此 Harness 不支持 Bearer Token 配置');
+      if (key === 'authToken' && harness !== 'claude-code' && !gatewayHarness) return fail('此 Harness 不支持 Bearer Token 配置');
+      if (key === 'apiKey' && gatewayHarness) return fail('请在原生 Harness 中配置模型 API Key，这里只保存 Gateway Token');
       credentials[key] = item === null ? null : string(item, '凭据', 8192) || null;
     }
   }

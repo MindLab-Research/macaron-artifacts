@@ -3,6 +3,17 @@
 /* streamdown 的逐词淡入只输出 `animation: sd-fadeIn`，keyframes 在它自己这个文件里 ——
    不引就是指向一个不存在的动画，CSS 静默忽略，文字直接蹦出来，看不出任何异常 */
 @import "streamdown/styles.css";
+@import "katex/dist/katex.min.css";
+
+.md .katex-display, .ui4a-math-block { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 0.25rem; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 calc(100% - 2rem), transparent); }
+.md .katex-display::-webkit-scrollbar, .ui4a-math-block::-webkit-scrollbar { display: none; }
+.ui4a-math-block { display: block; min-width: 0; }
+.ui4a-math-block .katex-display { margin: 0; }
+.ui4a-chart { color: var(--muted); font-size: 12px; }
+.ui4a-chart .recharts-cartesian-axis-tick text { fill: var(--muted); }
+.ui4a-chart .recharts-cartesian-grid line { stroke: var(--border); }
+.ui4a-chart .recharts-default-tooltip { background: var(--surface) !important; border-color: var(--border) !important; border-radius: 6px; color: var(--fg); }
+.ui4a-chart .recharts-tooltip-label { color: var(--fg); }
 
 html,
 body {
@@ -23,6 +34,33 @@ body { margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+button.pressable.interactive { transition-duration: 160ms; transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+button.pressable.interactive:active { transition-duration: 100ms; }
+button.pressable:focus-visible:active { scale: none; }
+/* Headless UI reports the resolved placement, including a popup flipped above its trigger. */
+.select-popup { --popup-origin-x: 100%; --popup-origin-y: 0%; transform-origin: var(--popup-origin-x) var(--popup-origin-y); transition-property: opacity, scale; }
+.select-popup[data-anchor~='top'] { --popup-origin-y: 100%; }
+.select-popup[data-anchor~='start'] { --popup-origin-x: 0%; }
+.select-popup:dir(rtl) { --popup-origin-x: 0%; }
+.select-popup:dir(rtl)[data-anchor~='start'] { --popup-origin-x: 100%; }
+/* Keyboard actions settle immediately, including when Escape interrupts a pointer-opened popup. */
+.select-popup[data-keyboard], [data-ui4a-disclosure-panel][data-keyboard], [data-export-collapsible][data-keyboard], [data-export-collapsible][data-keyboard] > [data-export-scroller], [data-export-collapsible][data-keyboard] > [data-export-toggle] { transition: none !important; }
+[data-export-toggle][data-export-fallback] { opacity: 1 !important; }
+.tool-disclosure-icon { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.tool-call[open] > summary .tool-disclosure-icon { transform: rotate(90deg); }
+.tool-call > summary:focus-visible { outline-offset: -2px; }
+/* Notifications live outside scrolling panels; expand the close hit area without enlarging its glyph. */
+.app-notifications [data-close-button]::after { content: ''; position: absolute; inset: -12px; }
+.app-notifications [data-content] { overflow-wrap: anywhere; }
+.app-notifications[data-sonner-toaster] [data-sonner-toast] [data-description] { color: var(--widget-muted); }
+.app-notifications [data-sonner-toast]:focus-visible,
+.app-notifications [data-close-button]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .export-trigger, .artifact-close { width: 44px; height: 44px; }
+  .export-menu-item, .tool-call > summary { min-height: 44px; }
+  .artifact-source-toggle { min-width: 44px; height: 44px; }
+  [data-export-toggle] { min-width: 44px; min-height: 44px; }
+}
 /* Low-specificity defaults preserve keyboard focus without overriding outline-none
    on composite controls, whose enclosing border is their focus indicator. */
 :where(:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -51,7 +89,7 @@ button:disabled { cursor: not-allowed; }
 
 /*
  * streamdown 的默认外观是一整套 Tailwind 类：代码块带标题栏和两个按钮、外框套内框再加底色，
- * 表格每格都有边框。跟本项目的取向（少层级、有边框就不要底色）是冲突的，所以这里按它暴露的
+ * 表格每格都有边框。跟本项目的取向（按区域底色分层、减少重复外框）是冲突的，所以这里按它暴露的
  * `[data-streamdown]` 钩子整体接管 —— 组件留这些属性就是给外部改样式用的。
  */
 .md {
@@ -92,7 +130,8 @@ button:disabled { cursor: not-allowed; }
 }
 .md [data-streamdown="inline-code"] {
   border-radius: 0.25rem;
-  background: var(--surface-3);
+  background: var(--inline-code);
+  color: var(--inline-code-fg);
   padding: 0.1em 0.3em;
   font-size: 0.9em;
 }
@@ -107,7 +146,8 @@ button:disabled { cursor: not-allowed; }
 .md [data-streamdown="code-block"] {
   border: 0;
   border-radius: 0.6rem;
-  background: var(--surface-2);
+  background: var(--code-block);
+  color: var(--code-block-fg);
   overflow: hidden;
 }
 .md [data-streamdown="code-block-header"] {
@@ -201,10 +241,14 @@ button:disabled { cursor: not-allowed; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Text, status icons and aria-busy retain feedback; rapid infinite loops must not survive the duration reduction. */
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  button.pressable:active, .select-popup { scale: none !important; }
+  .select-popup { transition-property: opacity !important; transition-duration: 150ms !important; }
 }

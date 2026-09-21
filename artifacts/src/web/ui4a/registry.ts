@@ -1,3 +1,5 @@
+import { randomUUID } from '../uuid';
+
 type Namespace = Record<string, unknown>;
 const REGISTRY = "macaron-artifacts.ui4a.modules";
 const globalRegistry = globalThis as typeof globalThis & { [key: symbol]: Map<string, Namespace> | undefined };
@@ -14,7 +16,7 @@ export function createModuleRegistry(modules: Record<string, Namespace>) {
   const ids: string[] = [];
   const imports: Record<string, string> = {};
   for (const [specifier, namespace] of Object.entries(modules)) {
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     namespaces.set(id, namespace);
     ids.push(id);
     imports[specifier] = URL.createObjectURL(new Blob([moduleSource(id, namespace)], { type: "text/javascript" }));

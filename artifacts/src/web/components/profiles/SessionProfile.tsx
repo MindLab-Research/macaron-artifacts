@@ -28,7 +28,7 @@ export function SessionProfileDialog({ session, running, onClose, onManage, onSa
     try { await onSave({ profileId: profileId || null, model: model.trim() || null }); onClose(); }
     catch (error) { setError(error instanceof Error ? error.message : '无法保存会话配置'); } finally { setBusy(false); }
   };
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} className="relative z-50"><div className="fixed inset-0 bg-black/40" /><div className="fixed inset-0 flex items-center justify-center p-3"><DialogPanel className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-5 shadow-2xl"><DialogTitle className="text-base font-medium">会话配置</DialogTitle><p className="mt-1 text-xs leading-5 text-muted">切换 Profile 后，下一轮沿用当前会话继续。</p>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} className="relative z-dialog"><div className="fixed inset-0 bg-black/40" /><div className="fixed inset-0 flex items-center justify-center p-3"><DialogPanel className="theme-widget max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl p-5"><DialogTitle className="text-base font-medium">会话配置</DialogTitle><p className="mt-1 text-xs leading-5 text-muted">切换 Profile 后，下一轮沿用当前会话继续。</p>
     <form onSubmit={event => { event.preventDefault(); void submit(); }} aria-busy={busy} className="mt-5 flex flex-col gap-4">
       <SessionProfileFields harness={session.harness} cwd={session.cwd} profileId={profileId} model={model} onProfile={id => { setProfileId(id); setModel(''); }} onModel={setModel} onManage={onManage} disabled={busy || running} />
       {running ? <p role="status" className="text-xs text-muted">当前一轮正在生成，结束后可切换。</p> : null}{error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}

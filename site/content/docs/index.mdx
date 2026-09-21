@@ -1,25 +1,17 @@
 ---
 title: Introduction
-description: One macaron-artifacts package for Claude Code, Codex, OpenCode, and pi in a unified local WebUI.
+description: One macaron-artifacts package for six coding harnesses, streaming conversations, and generated UI.
 ---
 
-**Macaron Artifacts** is one local WebUI for Claude Code, Codex, OpenCode, and pi. Install the `macaron-artifacts` package, start its CLI, and choose a harness for each conversation.
+**Macaron Artifacts** is one local WebUI for Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw. Install one package, start one server, and choose the harness per conversation.
 
 ## What You Get
 
 <Cards>
-  <Card title="Shared Interface" href="/docs/usage">
-    Choose your harness, workspace, and model in the same conversation interface.
-  </Card>
-  <Card title="Live Chat" href="/docs/usage">
-    Stream native text, reasoning, and tool events. Refreshing reconnects to active turns.
-  </Card>
-  <Card title="Generated UI" href="/docs/usage">
-    Render inline ui4a/tsx blocks and file-based Canvas tools as their source arrives.
-  </Card>
-  <Card title="Shared Themes" href="/docs/usage">
-    Shiki themes drive syntax highlighting and interface colors, including generated components.
-  </Card>
+  <Card title="Shared Interface" href="/docs/usage">Choose a harness, workspace, Profile, and model in the same conversation interface.</Card>
+  <Card title="Live Chat" href="/docs/usage">Stream native text, reasoning, tool input, approvals, and command output as each harness exposes them.</Card>
+  <Card title="Generated UI" href="/docs/usage">Render inline `ui4a/tsx` blocks and persistent `.artifacts` Canvas files with the same React runtime.</Card>
+  <Card title="Shared Themes" href="/docs/usage">Shiki theme families drive syntax highlighting, interface tokens, and generated components.</Card>
 </Cards>
 
-Head to [Usage](/docs/usage) to install and open the WebUI, or read [Packaging](/docs/architecture/packaging) for the single-package layout and module boundaries. Other architecture pages are marked as legacy where they describe the previous application.
+Head to [Usage](/docs/usage) to install and run the WebUI, or read [Architecture](/docs/architecture/overview) for the current implementation.

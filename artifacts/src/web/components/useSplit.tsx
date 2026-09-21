@@ -27,6 +27,7 @@ export function useSplit() {
   const container = useRef<HTMLDivElement>(null);
   const [fraction, setFraction] = useState(DEFAULT_FRACTION);
   const [dragging, setDragging] = useState(false);
+  const activePointer = useRef<number | null>(null);
 
   // 初值只能在这儿读：`useState` 的初始化跑在服务端，那里没有 localStorage。
   // lint 会建议「直接初始化 state」，照做就是 hydration 不匹配
@@ -52,31 +53,35 @@ export function useSplit() {
   }, []);
 
   const onPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (activePointer.current !== null || !event.isPrimary || event.button !== 0) return;
     // preventDefault 挡掉拖动时选中两侧文字，但它同时也挡掉了默认的聚焦 —— 键盘调节要靠这个焦点
     event.preventDefault();
     event.currentTarget.focus();
     // 指针捕获：拖到 iframe / canvas 内容上方时事件仍然回到分隔条，不会中途丢失
     event.currentTarget.setPointerCapture(event.pointerId);
+    activePointer.current = event.pointerId;
     setDragging(true);
   }, []);
 
   const onPointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
-      if (!dragging) return;
+      if (event.pointerId !== activePointer.current) return;
       const box = container.current?.getBoundingClientRect();
       if (!box) return;
       setFraction(clampFraction((box.right - event.clientX) / box.width, box.width));
     },
-    [dragging],
+    [],
   );
 
-  const onPointerUp = useCallback(
+  const endDrag = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
-      if (!dragging) return;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.pointerId !== activePointer.current) return;
+      // Clear ownership before releasing capture; the resulting lost-capture event is redundant.
+      activePointer.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       setDragging(false);
     },
-    [dragging],
+    [],
   );
 
   /** 键盘也能调：分隔条是可聚焦的 separator，方向键每次挪 2%。 */
@@ -90,7 +95,7 @@ export function useSplit() {
     });
   }, []);
 
-  return { container, fraction, dragging, handlers: { onPointerDown, onPointerMove, onPointerUp, onKeyDown, onPointerCancel: () => setDragging(false), onLostPointerCapture: () => setDragging(false) } };
+  return { container, fraction, dragging, handlers: { onPointerDown, onPointerMove, onPointerUp: endDrag, onKeyDown, onPointerCancel: endDrag, onLostPointerCapture: endDrag } };
 }
 
 export function SplitHandle({ dragging, fraction = 50, handlers }: { dragging: boolean; fraction?: number; handlers: ReturnType<typeof useSplit>["handlers"] }) {
@@ -105,9 +110,9 @@ export function SplitHandle({ dragging, fraction = 50, handlers }: { dragging: b
       tabIndex={0}
       {...handlers}
       // 视觉上只有 1px 的线，但热区有 9px —— 光标能落在上面，才谈得上"可拖动"
-      className={`group relative hidden w-px shrink-0 cursor-col-resize touch-none bg-border outline-none @[681px]/panes:block ${dragging ? "bg-accent" : ""}`}
+      className={`group relative hidden w-px shrink-0 cursor-col-resize touch-none bg-panel-border outline-none @[681px]/panes:block ${dragging ? "bg-accent" : ""}`}
     >
-      <span className="absolute inset-y-0 -right-1 -left-1 z-10" />
+      <span className="absolute inset-y-0 -right-1 -left-1 z-content-overlay" />
       <span className={`interactive absolute inset-y-0 left-0 w-px bg-accent ${dragging ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus:opacity-100"}`} />
     </div>
   );

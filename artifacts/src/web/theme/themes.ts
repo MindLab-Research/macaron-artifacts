@@ -1,7 +1,7 @@
 import { createHighlighterCore, type HighlighterCore, type ThemeRegistration } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 import { bundledThemes, bundledThemesInfo, type BundledTheme } from 'shiki/themes';
-import { themePalette } from './palette';
+import { readableSyntaxTheme, themePalette } from './palette';
 
 export type ThemeId = 'playground' | BundledTheme;
 export const THEME_OPTIONS: { id: ThemeId; label: string; type?: 'light' | 'dark' }[] = [
@@ -54,7 +54,7 @@ export async function highlighter(language: string, theme: string) {
   const engine = await core;
   const lang = normalizeLanguage(language);
   const jobs: Promise<unknown>[] = [];
-  if (!engine.getLoadedThemes().includes(theme)) jobs.push(loadTheme(theme).then(value => engine.loadTheme(value)));
+  if (!engine.getLoadedThemes().includes(theme)) jobs.push(loadTheme(theme).then(value => engine.loadTheme(readableSyntaxTheme(value))));
   if (lang !== 'text' && !languageLoads.has(lang)) languageLoads.set(lang, LANGUAGES[lang as keyof typeof LANGUAGES]().then(module => engine.loadLanguage(module.default as never)).then(() => undefined));
   const languageJob = languageLoads.get(lang);
   if (languageJob) jobs.push(languageJob);

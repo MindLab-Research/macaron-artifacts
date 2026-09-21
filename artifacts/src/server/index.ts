@@ -13,9 +13,12 @@ import { MetadataTasks } from './enrichment.js';
 import { listArtifacts, readUi4aFile, writeUi4aFile } from './artifacts.js';
 import { ProfileStore, validateProfileInput } from './profiles.js';
 import { safeError } from './harnesses/common.js';
-import { PairingManager, bearerToken, isLoopbackHost, originHost, originProtocol, type PairingGrant, type PairingOptions } from './pairing.js';
+import { closeHermesConnections } from './harnesses/hermes.js';
+import { PairingManager, bearerToken, type PairingGrant, type PairingOptions } from './pairing.js';
+import { AccessPolicy, PasswordAuth, type PasswordSession } from './auth.js';
 
-export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions }) {
+export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions; host?: string; password?: string; publicOrigin?: string }) {
+  const access = new AccessPolicy(options), auth = await PasswordAuth.create(options.password);
   const store = new SessionStore(options.directory), active = new Map<string, ActiveConversation>(), claims = new Set<string>();
   const pairing = new PairingManager(options.pairing);
   const profiles = options.profiles ?? new ProfileStore(join(options.directory, 'profiles'));
@@ -31,24 +34,25 @@ export async function createArtifactsServer(options: { directory: string; instru
   const harnesses = options.harnesses ?? adapters;
   await Promise.all([store.load(), profiles.load()]);
   const json = (res: ServerResponse, body: unknown, status = 200) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
-  async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
+  async function body(req: IncomingMessage, limit = 3 * 1024 * 1024): Promise<Record<string, unknown>> {
     const chunks: Buffer[] = []; let size = 0;
-    for await (const chunk of req) { size += chunk.length; if (size > 3 * 1024 * 1024) throw new Error('Request is too large.'); chunks.push(chunk); }
+    for await (const chunk of req) { size += chunk.length; if (size > limit) throw new Error('Request is too large.'); chunks.push(chunk); }
     return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
   }
   const server = createServer(async (req, res) => {
     try {
+    res.setHeader('x-content-type-options', 'nosniff'); res.setHeader('x-frame-options', 'DENY');
     const url = new URL(req.url || '/', 'http://localhost'), segments = url.pathname.split('/').filter(Boolean);
-    let grant: PairingGrant | undefined, localRequest = false;
+    const policy = access.request(req, auth.enabled);
+    if (!policy.allowed) return json(res, { error: 'This host is not allowed.' }, 403);
+    let grant: PairingGrant | undefined, passwordSession: PasswordSession | undefined, localRequest = false;
     // Native harnesses can mutate files. A local browser must not let an unrelated origin trigger them.
     if (url.pathname.startsWith('/api/')) {
-      const requestHost = req.headers.host;
-      if (!isLoopbackHost(requestHost)) return json(res, { error: 'A loopback host is required.' }, 403);
       const origin = req.headers.origin;
-      const originHostValue = originHost(origin);
-      if (origin && !originHostValue) return json(res, { error: 'Invalid Origin.' }, 400);
-      const crossOrigin = Boolean(origin && (originHostValue !== requestHost || originProtocol(origin) !== 'http:'));
+      if (policy.invalidOrigin) return json(res, { error: 'Invalid Origin.' }, 400);
+      const crossOrigin = policy.crossOrigin;
       localRequest = !crossOrigin;
+      if (crossOrigin && (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/'))) return json(res, { error: 'Password authentication must use the same origin.' }, 403);
       if (crossOrigin && !pairing.enabled) return json(res, { error: 'Cross-origin requests are not accepted.' }, 403);
       if (crossOrigin && !pairing.originAllowed(origin)) return json(res, { error: 'This WebUI origin is not allowed.' }, 403);
       if (crossOrigin) {
@@ -59,8 +63,22 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS', 'access-control-allow-headers': 'authorization, content-type, accept', 'access-control-expose-headers': 'x-vercel-ai-ui-message-stream', 'access-control-max-age': '600', ...(req.headers['access-control-request-private-network'] === 'true' ? { 'access-control-allow-private-network': 'true' } : {}) }); return res.end(); }
         if (url.pathname !== '/api/health' && !pairingRoute && !(grant = pairing.authenticate(bearerToken(req.headers.authorization), origin))) return json(res, { error: 'Pairing authentication required.', authRequired: true }, 401);
       }
+      if (localRequest) passwordSession = auth.authenticate(req);
     }
       if (url.pathname === '/api/health') return json(res, { ok: true });
+      if (url.pathname === '/api/auth' && req.method === 'GET') return json(res, { enabled: auth.enabled, authenticated: !auth.enabled || Boolean(passwordSession) });
+      if (url.pathname === '/api/auth/login' && req.method === 'POST') {
+        if (!auth.enabled) return json(res, { error: 'Password protection is disabled.' }, 404);
+        auth.checkAttempt(req.socket.remoteAddress ?? 'unknown');
+        if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') return json(res, { error: 'Use application/json.' }, 415);
+        const input = await body(req, 8192);
+        try { await auth.login(input.password, res, policy.secure); }
+        catch (error) { if ((error as { status?: number }).status === 401) return json(res, { error: '密码不正确。', authRequired: true, passwordRequired: true }, 401); throw error; }
+        return json(res, { enabled: true, authenticated: true });
+      }
+      if (url.pathname === '/api/auth/logout' && req.method === 'POST') { auth.logout(req, res, policy.secure); return json(res, { enabled: auth.enabled, authenticated: !auth.enabled }); }
+      // A loopback Host or absent Origin is not authentication, even behind an SSH tunnel or proxy.
+      if (url.pathname.startsWith('/api/') && auth.enabled && !passwordSession && !grant && !(url.pathname === '/api/pair' && !localRequest && req.method === 'POST')) return json(res, { error: '请先输入访问密码。', authRequired: true, passwordRequired: true }, 401);
       if (url.pathname === '/api/pair' && req.method === 'POST') {
         if (localRequest || !req.headers.origin) return json(res, { error: 'Pairing must be claimed from the hosted WebUI.' }, 403);
         const input = await body(req), result = pairing.claim(typeof input.code === 'string' ? input.code : '', req.headers.origin);
@@ -158,6 +176,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (segments[3] === 'metadata' && req.method === 'GET') {
           res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' }); req.socket.setNoDelay(true);
           if (grant) pairing.track(grant, res);
+          if (passwordSession && !auth.track(passwordSession, res)) return;
           const unsubscribe = metadata.subscribe(session, { update: recap => res.write(`data: ${JSON.stringify(recap)}\n\n`), close: () => res.end() });
           res.on('close', unsubscribe); return;
         }
@@ -178,6 +197,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         const run = active.get(segments[2]);
         if (!run) { res.writeHead(204); return res.end(); }
         if (grant) pairing.track(grant, res);
+        if (passwordSession && !auth.track(passwordSession, res)) return;
         req.socket.setNoDelay(true);
         return await pipeUIMessageStreamToResponse({ response: res, stream: run.stream(), headers: { 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' } });
       }
@@ -195,7 +215,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (session.messages.some(message => message.id === user.id) && !retry) return json(res, { error: 'This message was already submitted.' }, 409);
         // Claim before the first await. Two simultaneous POSTs must never both
         // append a user message and start native turns for the same session.
-        claims.add(session.id); void metadata.cancel(session.id);
+        claims.add(session.id); await metadata.cancel(session.id);
         const previous = { ...session, messages: [...session.messages], suggestions: [...session.suggestions] };
         let run: ActiveConversation;
         try {
@@ -212,6 +232,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         finally { claims.delete(session.id); }
         void run.done.finally(() => { if (active.get(session.id) === run) active.delete(session.id); }).catch(error => { console.error('Session persistence failed:', error); });
         if (grant) pairing.track(grant, res);
+        if (passwordSession && !auth.track(passwordSession, res)) return;
         req.socket.setNoDelay(true);
         return await pipeUIMessageStreamToResponse({ response: res, stream: run.stream(), headers: { 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' } });
       }
@@ -222,24 +243,28 @@ export async function createArtifactsServer(options: { directory: string; instru
       const file = extname(path) ? path : join(options.webRoot, 'index.html');
       const mime: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.json': 'application/json' };
       res.writeHead(200, { 'content-type': mime[extname(file)] ?? 'application/octet-stream' }); res.end(await readFile(file));
-    } catch (error) { if (!res.headersSent) json(res, { error: safeError(error) }, (error as { status?: number }).status ?? (error as { statusCode?: number }).statusCode ?? ((error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400)); else res.end(); }
+    } catch (error) { if (!res.headersSent) { const retryAfter = (error as { retryAfter?: number }).retryAfter; if (retryAfter) res.setHeader('retry-after', retryAfter); json(res, { error: safeError(error) }, (error as { status?: number }).status ?? (error as { statusCode?: number }).statusCode ?? ((error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400)); } else res.end(); }
   });
-  return { server, store, profiles, active, pairing, async close() { for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { server, store, profiles, active, pairing, async close() { auth.dispose(); for (const run of active.values()) run.stop(); await Promise.allSettled([...active.values()].map(run => run.done)); await metadata.close(); await closeHermesConnections(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), import.meta.url.endsWith('/src/server/index.ts') ? '../..' : '..');
   const instructions = await readFile(join(root, 'skills/ui4a/SKILL.md'), 'utf8');
   const pairing = /^(1|true|yes)$/i.test(process.env.MACARON_PAIR || '') ? { enabled: true, allowedOrigins: (process.env.MACARON_ALLOWED_ORIGINS || 'https://artifacts.macaron.im').split(',').map(value => value.trim()).filter(Boolean) } : undefined;
-  const app = await createArtifactsServer({ directory: process.env.MACARON_DATA_DIR || join(homedir(), '.macaron-artifacts/sessions'), instructions, webRoot: join(root, 'dist/web'), pairing });
+  const host = process.env.MACARON_HOST ?? '127.0.0.1', password = process.env.MACARON_PASSWORD, publicOrigin = process.env.MACARON_PUBLIC_ORIGIN;
+  // Agent tools inherit this process's environment; the WebUI credential must never reach them.
+  delete process.env.MACARON_PASSWORD;
+  const app = await createArtifactsServer({ directory: process.env.MACARON_DATA_DIR || join(homedir(), '.macaron-artifacts/sessions'), instructions, webRoot: join(root, 'dist/web'), pairing, host, password, publicOrigin });
   const port = Number(process.env.MACARON_PORT || 43860);
-  app.server.listen(port, '127.0.0.1', () => {
-    console.log(`Macaron Artifacts: http://127.0.0.1:${port}`);
+  app.server.listen(port, host, () => {
+    console.log(`Macaron Artifacts: ${publicOrigin || `http://${host.includes(':') ? `[${host}]` : host}:${port}`}`);
+    if (password !== undefined) console.log('Password protection: enabled');
     if (app.pairing.enabled) {
       console.log(`Connect: https://artifacts.macaron.im/connect?server=${encodeURIComponent(`http://127.0.0.1:${port}`)}`);
       console.log(`Pairing code: ${app.pairing.code} (expires ${new Date(app.pairing.codeExpiry).toISOString()})`);
       if (process.env.SSH_CONNECTION) console.log(`SSH port forward: ssh -N -L ${port}:127.0.0.1:${port} <user>@<host>`);
-      console.log(`To generate a new code locally: curl -X POST http://127.0.0.1:${port}/api/pair/code`);
+      console.log(password !== undefined ? 'To generate a new code, POST /api/pair/code from a signed-in browser.' : `To generate a new code locally: curl -X POST http://127.0.0.1:${port}/api/pair/code`);
     }
   });
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { void app.close().then(() => process.exit()); });

@@ -4,9 +4,11 @@ import type { Artifact, ChatMessage, HarnessId, HarnessInfo, MessageData, Sessio
 import { consumeMetadata } from './metadata';
 import { artifactEntryPath } from '../../shared/artifact-path';
 import { apiUrl, connectionHeaders } from './connection';
+import { authenticatedFetch } from './auth';
+import { randomUUID } from '../uuid';
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiUrl(path), { ...init, headers: connectionHeaders({ 'content-type': 'application/json', ...init?.headers }) });
+  const response = await authenticatedFetch(apiUrl(path), { ...init, headers: connectionHeaders({ 'content-type': 'application/json', ...init?.headers }) });
   if (!response.ok) { const body = await response.text(); let detail = body; try { detail = JSON.parse(body).error ?? body; } catch { /* Some failures are plain text. */ } throw new Error(detail || `请求失败 (${response.status})`); }
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
@@ -36,9 +38,10 @@ export class WorkspaceStore {
   private configurationRevisions = new Map<string, number>();
   private selectedArtifacts = new Map<string, string>();
   private dismissed = new Map<string, string>();
+  private disposed = false;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.snapshot;
-  private publish(patch: Partial<WorkspaceSnapshot> = {}) { this.snapshot = { ...this.snapshot, ...patch, revision: this.snapshot.revision + 1 }; for (const listener of this.listeners) listener(); }
+  private publish(patch: Partial<WorkspaceSnapshot> = {}) { if (this.disposed) return; this.snapshot = { ...this.snapshot, ...patch, revision: this.snapshot.revision + 1 }; for (const listener of this.listeners) listener(); }
   private update(id: string, patch: Partial<SessionSummary>) { this.publish({ sessions: this.snapshot.sessions.map(session => session.id === id ? { ...session, ...patch } : session) }); }
   clearError = () => this.publish({ error: undefined });
   fail = (error: unknown) => this.publish({ error: error instanceof Error ? error.message : String(error) });
@@ -56,11 +59,19 @@ export class WorkspaceStore {
     for (const listener of this.draftListeners.get(id) ?? []) listener();
   };
   selectedArtifact = (id: string) => this.selectedArtifacts.get(id);
+  dispose = () => {
+    this.disposed = true; this.queues.clear(); this.listeners.clear(); this.draftListeners.clear();
+    for (const controller of this.metadata.values()) controller.abort();
+    this.metadata.clear();
+    // This only detaches browser streams. Native turns survive logout and can be resumed after login.
+    for (const chat of this.chats.values()) void chat.stop();
+  };
 
   initialize = () => this.initialization ??= this.loadInitial();
   private async loadInitial() {
     try {
       const [sessions, harnesses] = await Promise.all([api<SessionSummary[]>('/api/sessions'), api<HarnessInfo[]>('/api/harnesses')]);
+      if (this.disposed) return;
       const remembered = stored(ACTIVE_KEY);
       const activeId = sessions.find(session => session.id === remembered)?.id ?? sessions[0]?.id ?? null;
       this.publish({ sessions, harnesses, ready: true, activeId });
@@ -69,6 +80,7 @@ export class WorkspaceStore {
   }
 
   select = async (id: string) => {
+    if (this.disposed) return;
     remember(ACTIVE_KEY, id);
     this.publish({ activeId: id, loading: !this.chats.has(id), error: undefined });
     try { await this.load(id); } catch (error) { this.fail(error); }
@@ -82,13 +94,15 @@ export class WorkspaceStore {
     if (pending) return pending;
     const configuration = this.configurationRevisions.get(id);
     const task = Promise.all([api<Session>(`/api/sessions/${id}`), api<Artifact[]>(`/api/sessions/${id}/artifacts`)]).then(([session, artifacts]) => {
+      if (this.disposed) throw new DOMException('Workspace detached', 'AbortError');
       this.files.set(id, new Map(artifacts.map(artifact => [artifact.path, artifact])));
       const chat = new Chat<ChatMessage>({
         id, messages: session.messages,
-        transport: new DefaultChatTransport<ChatMessage>({ api: apiUrl('/api/chat'), headers: connectionHeaders(), prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, messages }, headers: connectionHeaders() }) }),
+        transport: new DefaultChatTransport<ChatMessage>({ api: apiUrl('/api/chat'), fetch: authenticatedFetch as typeof fetch, headers: connectionHeaders(), prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, messages }, headers: connectionHeaders() }) }),
         onData: part => this.onData(id, part),
         onError: error => this.update(id, { status: 'error', error: error.message }),
         onFinish: ({ isError, isDisconnect }) => {
+          if (this.disposed) return;
           if (!isError && !isDisconnect) this.update(id, { status: 'idle', error: undefined });
           const turn = this.turns.get(id);
           void this.refresh(id, turn, isError || isDisconnect).then(() => { if (!isError && !isDisconnect && this.turns.get(id) === turn) void this.subscribeMetadata(id); });
@@ -108,6 +122,7 @@ export class WorkspaceStore {
   }
 
   private onData(id: string, part: DataUIPart<MessageData>) {
+    if (this.disposed) return;
     if (part.type === 'data-artifact') {
       let files = this.files.get(id);
       if (!files) this.files.set(id, files = new Map());
@@ -126,6 +141,7 @@ export class WorkspaceStore {
   }
 
   private async refresh(id: string, turn = this.turns.get(id), restoreMessages = false) {
+    if (this.disposed) return;
     const configuration = this.configurationRevisions.get(id);
     try {
       const { messages, ...summary } = await api<Session>(`/api/sessions/${id}`);
@@ -145,11 +161,12 @@ export class WorkspaceStore {
 
   private cancelMetadata(id: string) { this.metadata.get(id)?.abort(); this.metadata.delete(id); }
   private async subscribeMetadata(id: string) {
+    if (this.disposed) return;
     this.cancelMetadata(id);
     const controller = new AbortController();
     this.metadata.set(id, controller);
     try {
-      const response = await fetch(apiUrl(`/api/sessions/${id}/metadata`), { signal: controller.signal, headers: connectionHeaders({ accept: 'text/event-stream' }) });
+      const response = await authenticatedFetch(apiUrl(`/api/sessions/${id}/metadata`), { signal: controller.signal, headers: connectionHeaders({ accept: 'text/event-stream' }) });
       if (!response.ok || !response.body) return;
       await consumeMetadata(response.body, recap => {
         // Cancellation can race with a decoded frame; the ownership check prevents an old turn from renaming the new one.
@@ -183,15 +200,16 @@ export class WorkspaceStore {
   };
 
   send = (id: string, text: string) => {
-    if (!text.trim()) return;
+    if (this.disposed || !text.trim()) return;
     this.cancelMetadata(id);
     const queue = this.queue(id);
-    this.queues.set(id, [...queue, { id: crypto.randomUUID(), text }]);
+    this.queues.set(id, [...queue, { id: randomUUID(), text }]);
     this.publish();
     void this.drain(id);
   };
   dropQueued = (id: string, itemId: string) => { this.queues.set(id, this.queue(id).filter(item => item.id !== itemId)); this.publish(); };
   private async drain(id: string) {
+    if (this.disposed) return;
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id) || chat.status === 'streaming' || chat.status === 'submitted') return;
     const [item, ...rest] = this.queue(id);
@@ -208,6 +226,7 @@ export class WorkspaceStore {
     finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
   }
   resume = async (id: string) => {
+    if (this.disposed) return;
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id)) return;
     const turn = this.turns.get(id);
@@ -217,6 +236,7 @@ export class WorkspaceStore {
     finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); await this.refresh(id, turn, true); void this.drain(id); } }
   };
   retry = async (id: string) => {
+    if (this.disposed) return;
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id) || chat.status === 'streaming' || chat.status === 'submitted') return;
     this.inflight.add(id);
@@ -226,7 +246,7 @@ export class WorkspaceStore {
     this.liveRevisions.delete(id);
     try {
       const remote = await api<Session>(`/api/sessions/${id}`);
-      if (this.turns.get(id) !== turn) return;
+      if (this.disposed || this.turns.get(id) !== turn) return;
       const lastUser = chat.messages.findLast(message => message.role === 'user');
       if (lastUser && !remote.messages.some(message => message.id === lastUser.id)) {
         if (remote.status === 'running') throw new Error('这个会话仍有一轮正在生成，请稍后重试。');

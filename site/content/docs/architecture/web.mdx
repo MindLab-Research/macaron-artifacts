@@ -1,75 +1,26 @@
 ---
 title: Web
-description: The retained React SPA entries, the GenUI runtime bootstrap, a fetch-based SSE reader, and the session canvas.
+description: The shared React application for conversations, Profiles, Canvas, approvals, and themes.
 ---
 
-<Callout type="warn" title="Historical v0 implementation">
-  This page describes the previous application, archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Its source paths and launchers are no longer part of `main`. For the unified application, see [Usage](/docs/usage) and [Packaging](/docs/architecture/packaging).
-</Callout>
+The WebUI is a single Vite-built React application under `artifacts/src/web`. It does not select a different SPA for each harness: the active conversation tells the server which `HarnessAdapter` to use, while the browser keeps one consistent interaction model.
 
-The front end (`web/`) is a Vite + React SPA. It has no server-side rendering — the Fastify server hands the browser the selected prebuilt HTML document and the app takes over from there with a hash router.
+## Main surfaces
 
-## Harness Entries, One Build
+- `App.tsx` composes the sidebar, top bar, conversation, composer, Profile manager, and responsive Canvas split view.
+- `src/web/chat` keeps a stable AI SDK Chat instance per session, queues messages for the owning session, and reconnects to active turns.
+- `ArtifactPanel` discovers `.artifacts/canvases/*.ui4a.tsx`, shows source while it streams, and mounts the live Canvas when the module is ready.
+- `src/web/components/profiles` edits harness-specific Profiles with Headless UI controls and applies changes from the next turn.
+- `src/web/theme` maps Shiki workbench roles to semantic CSS variables shared by the host and generated UI.
 
-`web/vite.config.ts` declares the Claude, Codex, and Kimi entries in one build, so their SPA bundles share asset chunks:
+## Rendering and accessibility
 
-```ts
-input: {
-  main: path.resolve(__dirname, 'index.html'),   // Claude UI
-  codex: path.resolve(__dirname, 'codex.html'),  // Codex UI
-  kimi: path.resolve(__dirname, 'kimi.html'),    // Kimi UI
-}
-```
+Host controls use native HTML plus Headless UI where behavior is stateful: dialogs, tabs, selects, disclosures, and menus retain keyboard navigation and focus management. UnoCSS `presetWind4` supplies the shared reset and utilities. Generated surfaces use a scoped Wind4 runtime so they cannot replace the host reset.
 
-The server picks which one is `/` at boot (see [Overview](/docs/architecture/overview)). In dev, Vite serves on `:5273` (`strictPort`) and proxies `/api` to the server on `:7878`.
+The layout preserves background turns when the selected conversation changes. Mobile viewports collapse Canvas into a drawer, and the split separator exposes its current value to assistive technology. Focus indicators come from the theme's focus token rather than from repeated container borders.
 
-<Callout title="One lightweight component contract">
-  The retained web application shares the unified app's six `$ui4a/ui` components: Button, Field, Card, Badge, Tabs, and Disclosure. Native HTML and UnoCSS Wind4 utilities handle layout; additional controls and charts use `@headlessui/react` and `recharts` directly. `$macaron/ui` remains a compatibility alias for these same six exports. React and `partial-react` are deduplicated by Vite.
-</Callout>
+Reasoning is visible by default. Summary updates show the latest entry while keeping earlier entries available; full reasoning uses a height-limited scrolling region with fading edges. Scrolling up pauses automatic following. The UI preserves independent AI SDK reasoning parts and their tool/text boundaries instead of joining them into one monologue. Streaming motion and automatic following stop when the turn ends or is interrupted.
 
-## Runtime Bootstrap
+## Themes
 
-The three entries bootstrap GenUI differently. The **Claude** entry (`web/src/main.tsx`) stands up the whole GenUI runtime *before* the app renders — model-authored TSX previews are core to that UI, so the globals must exist up front. The **Codex** and **Kimi** entries (`web/src/codex/main.tsx`, `web/src/kimi/main.tsx`) stay chat-focused and **lazy-load** the GenUI runtime (`React.lazy` + `Suspense` in their chat views) only when a `render_ui` card needs to render.
-
-The steps below describe the Claude bootstrap:
-
-<Steps>
-<Step>
-### Expose React + Macaron globals
-
-React, the JSX runtimes, ReactDOM, the six UI4A components, Headless UI, Recharts, Lucide, and `motion/react` are imported as namespaces and published to the page so streamed GenUI modules can resolve them without a bundler. Chat actions use the retained `$macaron/chat` bridge.
-</Step>
-<Step>
-### Boot the UnoCSS runtime
-
-`@unocss/runtime` with `presetWind4` + animations generates utility classes from the DOM at runtime. All three entries share one initialization path and Wind4's built-in reset, so lazily opening a generated UI never injects another reset over the application.
-</Step>
-<Step>
-### Mount the hash router
-
-`createHashRouter` wires the views — Dashboard, Workspace, Session, Settings, Analytics, and more — under the `App` shell.
-</Step>
-</Steps>
-
-## Streaming a Turn
-
-The client reads SSE with **`fetch` + a streaming body reader**, not `EventSource` (`web/src/lib/sse.ts`). That's deliberate: `EventSource` can't send a request body or custom headers, and turns are POSTs carrying the message + attachments. The reader parses the same `SessionStreamEvent` union the server publishes and dispatches into a live store that the views subscribe to.
-
-## The Session Canvas
-
-The Workspace view (`web/src/views/Workspace.tsx` + `web/src/lib/canvas.ts`) is a free-form canvas of session tiles rather than a list:
-
-<Cards>
-  <Card title="Pin & arrange">
-    Pin a session with `+`; drag the grip to reposition, pull the bottom-right corner to resize, click a tile to focus.
-  </Card>
-  <Card title="Live tiles">
-    Each tile tails its session over SSE, so thinking, tool calls, and GenUI previews update in place as a turn runs.
-  </Card>
-</Cards>
-
-## Auth Gate
-
-When the server arms a token (non-loopback bind), `web/src/components/AuthGate.tsx` intercepts the app: it reads the token from the `?token=` connect URL, stores it, and attaches it to every `/api` request. On loopback with no token, the gate is a no-op.
-
-Next: how the [GenUI preview](/docs/architecture/genui) compiles and renders model-authored TSX live.
+The picker stores a paired light/dark family. Appearance (`auto`, light, or dark) remains independent from family selection, and only the variant matching the current appearance is loaded. Theme roles include editor, sidebar, title bar, menu, widget, input, dropdown, selection, focus, and optional borders; missing roles fall back to composited semantic values instead of painting every surface with a border.

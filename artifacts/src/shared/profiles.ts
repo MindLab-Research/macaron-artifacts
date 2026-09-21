@@ -8,6 +8,9 @@ export interface ProfileConfig {
   subagentEffort?: string;
   provider?: string;
   baseUrl?: string;
+  /** Native agent gateway, distinct from a model provider API endpoint. */
+  gatewayUrl?: string;
+  nativeProfile?: string;
   authMode?: 'inherit' | 'api-key' | 'auth-token';
   forceSubagentModel?: boolean;
   modelAliases?: Partial<Record<'opus' | 'sonnet' | 'haiku' | 'fable', string>>;

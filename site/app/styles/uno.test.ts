@@ -36,8 +36,8 @@ test('vendor compatibility retains Fumadocs components and removes its sole rese
 
 test('Shiki palettes carry readable controls and complete Fumadocs surface tokens', async () => {
   const palette = paletteVariables(await loadPalette('github-light'));
-  assert.equal(palette.background, '#fff');
-  assert.equal(palette['primary-foreground'], '#000000');
+  assert.equal(palette.background, '#ffffff');
+  assert.equal(palette['primary-foreground'], '#ffffff');
   for (const key of ['foreground', 'muted-foreground', 'border', 'ring', 'popover', 'accent']) assert.ok(palette[key]);
   assert.equal(readableText('#159739', '#ffffff'), '#000000');
 });

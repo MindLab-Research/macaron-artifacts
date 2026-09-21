@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readUIMessageStream } from 'ai';
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessTurn } from './types.js';
 import { ClaudeEventMapper, claudeOptions } from './claude.js';
@@ -90,7 +91,25 @@ describe('Codex native deltas', () => {
     chunks.push(...mapper.map('item/completed', { item: { id: 'r', type: 'reasoning', summary: ['Summary'], content: ['Detail'] } }));
     expect(chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.delta)).toEqual(['A', ' ', '中']);
     expect(chunks.filter((chunk) => chunk.type === 'reasoning-delta').map((chunk) => chunk.delta)).toEqual(['Summary', 'Detail']);
+    expect(chunks.filter((chunk) => chunk.type === 'reasoning-start')).toEqual([
+      { type: 'reasoning-start', id: 'r:summary:0', providerMetadata: { macaron: { reasoningKind: 'summary', itemId: 'r' } } },
+      { type: 'reasoning-start', id: 'r:content:0', providerMetadata: { macaron: { reasoningKind: 'full', itemId: 'r' } } },
+    ]);
     expect(chunks.filter((chunk) => chunk.type === 'reasoning-end')).toHaveLength(2);
+  });
+
+  test('keeps fallback reasoning boundaries and metadata through UI message parsing', async () => {
+    const mapper = new CodexEventMapper();
+    const chunks = mapper.map('item/completed', { item: { id: 'r', type: 'reasoning', summary: ['', '**Inspecting the source**', '**Checking the tests**'], content: ['Full reasoning\nkeeps its original text.'] } });
+    const stream = new ReadableStream<ChatChunk>({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } });
+    let message;
+    for await (const snapshot of readUIMessageStream({ stream })) message = snapshot;
+    expect(message?.parts).toEqual([
+      { type: 'reasoning', id: 'r:summary:1', text: '**Inspecting the source**', state: 'done', providerMetadata: { macaron: { reasoningKind: 'summary', itemId: 'r' } } },
+      { type: 'reasoning', id: 'r:summary:2', text: '**Checking the tests**', state: 'done', providerMetadata: { macaron: { reasoningKind: 'summary', itemId: 'r' } } },
+      { type: 'reasoning', id: 'r:content:0', text: 'Full reasoning\nkeeps its original text.', state: 'done', providerMetadata: { macaron: { reasoningKind: 'full', itemId: 'r' } } },
+    ]);
+    expect(mapper.finish()).toEqual([]);
   });
 
   test('keeps each native command output delta rather than synthesizing final output chunks', () => {

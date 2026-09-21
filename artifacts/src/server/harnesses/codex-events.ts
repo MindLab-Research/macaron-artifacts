@@ -1,7 +1,7 @@
 import type { ChatChunk } from '../../shared/types.js';
 import { record, safeError, string } from './common.js';
 
-type Part = { id: string; itemId: string; kind: 'text' | 'reasoning'; ended: boolean; receivedDelta: boolean };
+type Part = { id: string; itemId: string; kind: 'text' | 'summary' | 'full'; ended: boolean; receivedDelta: boolean };
 
 /** Protocol fields verified with `codex app-server generate-ts --experimental` (0.153.4). */
 export class CodexEventMapper {
@@ -14,9 +14,9 @@ export class CodexEventMapper {
     if (method === 'item/agentMessage/delta' || method === 'item/plan/delta') {
       this.delta(itemId, itemId, 'text', params.delta, chunks);
     } else if (method === 'item/reasoning/summaryTextDelta') {
-      this.delta(`${itemId}:summary:${params.summaryIndex ?? 0}`, itemId, 'reasoning', params.delta, chunks);
+      this.delta(`${itemId}:summary:${params.summaryIndex ?? 0}`, itemId, 'summary', params.delta, chunks);
     } else if (method === 'item/reasoning/textDelta') {
-      this.delta(`${itemId}:content:${params.contentIndex ?? 0}`, itemId, 'reasoning', params.delta, chunks);
+      this.delta(`${itemId}:content:${params.contentIndex ?? 0}`, itemId, 'full', params.delta, chunks);
     } else if (method === 'item/commandExecution/outputDelta' || method === 'item/fileChange/outputDelta') {
       if (typeof params.delta === 'string') chunks.push({ type: 'data-command', data: { toolCallId: itemId, output: params.delta } });
     } else if (method === 'thread/tokenUsage/updated') {
@@ -34,8 +34,8 @@ export class CodexEventMapper {
         else this.start(id, id, 'text', chunks);
       } else if (item.type === 'reasoning') {
         if (completed) {
-          for (const [index, text] of (Array.isArray(item.summary) ? item.summary : []).entries()) this.fallback(`${id}:summary:${index}`, id, 'reasoning', text, chunks);
-          for (const [index, text] of (Array.isArray(item.content) ? item.content : []).entries()) this.fallback(`${id}:content:${index}`, id, 'reasoning', text, chunks);
+          for (const [index, text] of (Array.isArray(item.summary) ? item.summary : []).entries()) this.fallback(`${id}:summary:${index}`, id, 'summary', text, chunks);
+          for (const [index, text] of (Array.isArray(item.content) ? item.content : []).entries()) this.fallback(`${id}:content:${index}`, id, 'full', text, chunks);
         }
       } else {
         const tool = this.tool(item);
@@ -64,7 +64,8 @@ export class CodexEventMapper {
     if (existing) return existing;
     const part: Part = { id, itemId, kind, ended: false, receivedDelta: false };
     this.parts.set(id, part);
-    chunks.push({ type: kind === 'text' ? 'text-start' : 'reasoning-start', id });
+    if (kind === 'text') chunks.push({ type: 'text-start', id });
+    else chunks.push({ type: 'reasoning-start', id, providerMetadata: { macaron: { reasoningKind: kind, itemId } } });
     return part;
   }
   private delta(id: string, itemId: string, kind: Part['kind'], value: unknown, chunks: ChatChunk[]) {

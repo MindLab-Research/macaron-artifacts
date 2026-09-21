@@ -357,7 +357,7 @@ test('production index: underscored identifiers stay searchable, corrupted forms
 
   // Real Orama queries: the true identifier hits, the underscore-stripped
   // corruption the old sanitizer produced returns nothing.
-  for (const id of ['MACARON_CODEX_TRANSPORT', 'MACARON_AUTH_TOKEN', 'MACARON_ENGINE', 'permission_request']) {
+  for (const id of ['MACARON_PORT', 'MACARON_DATA_DIR', 'OPENCLAW_GATEWAY_URL']) {
     const hits = await server.search(id);
     assert.ok(hits.length > 0, `query "${id}" should hit the production index`);
     const corrupted = await server.search(id.replace(/_/g, ''));
@@ -427,7 +427,7 @@ test('built /api/search: real Orama client honours the contract', async (t) => {
   try {
     const client = oramaStaticClient({ from: 'http://test.local/api/search' });
 
-    for (const id of ['MACARON_CODEX_TRANSPORT', 'MACARON_AUTH_TOKEN', 'permission_request']) {
+    for (const id of ['MACARON_PORT', 'MACARON_DATA_DIR', 'OPENCLAW_GATEWAY_URL']) {
       const hits = await client.search(id);
       assert.ok(Array.isArray(hits) && hits.length > 0, `built index: "${id}" should hit`);
       const corrupted = await client.search(id.replace(/_/g, ''));

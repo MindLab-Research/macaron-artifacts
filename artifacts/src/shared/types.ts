@@ -1,6 +1,6 @@
 import type { InferUIMessageChunk, UIMessage } from 'ai';
 
-export type HarnessId = 'claude-code' | 'codex' | 'opencode' | 'pi';
+export type HarnessId = 'claude-code' | 'codex' | 'opencode' | 'pi' | 'hermes' | 'openclaw';
 export interface HarnessInfo { id: HarnessId; name: string; available: boolean; detail?: string; capabilities: { textDeltas: boolean; reasoningDeltas: boolean; toolInputDeltas: boolean; commandOutputDeltas: boolean; approvals: boolean; fork: boolean } }
 export interface Artifact { path: string; source: string; streaming: boolean; revision: number }
 export interface Approval { id: string; tool: string; input: unknown }

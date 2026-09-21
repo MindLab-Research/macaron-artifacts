@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { stepTailSpring } from "./tail-spring";
 
 /**
  * 两条边各自「外面还藏了多少」，`0`～`1`，离边超过 `range` 像素就饱和。
@@ -20,12 +21,10 @@ function scrollEdges(element: HTMLElement, range: number) {
  * 用弹簧而不是 `scroll-behavior: smooth`：流式每帧都在改目标，smooth 每次赋值都重启一段动画，
  * 叠起来是一顿一顿的；弹簧只有一个持续积分的状态，目标变了也不会打断，看着是一条连续的位移。
  */
-const STIFFNESS = 180;
-const DAMPING = 28;
-
 export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: number, range: number) {
   const [edges, setEdges] = useState({ top: 0, bottom: 0 });
   const following = useRef(false);
+  const paused = useRef(false);
   /** 上次量到的内容高度。`0` = 还没量过 —— 内容一次到位（刷新、翻历史消息）不算「长出来」，那种该停在开头。 */
   const seen = useRef(0);
   /** 自己维护浮点位置：`scrollTop` 读回来会被取整，拿它当积分状态会在低速段卡住。 */
@@ -37,10 +36,12 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
     const element = ref.current;
     if (!element) return;
     const measure = () => {
+      // Once all content fits again there is no hidden history to protect from future growth.
+      if (element.scrollHeight <= element.clientHeight) paused.current = false;
       const { start: top, end: trailing } = scrollEdges(element, range);
       // 滚到底就重新挂上跟随。但内容还没撑开时（scrollHeight === clientHeight）不算 ——
       // 那是「还没有东西」，不是「已经看到底了」
-      if (!trailing && element.scrollHeight > element.clientHeight) following.current = true;
+      if (!paused.current && !trailing && element.scrollHeight > element.clientHeight) following.current = true;
       // 跟随中底边一律不糊：弹簧总是落后于正在长高的内容一小段，按距离算的话渐隐带会一直挂在那儿，
       // 糊的正好是刚写出来的那一行 —— 而那一段「还没追上」在语义上不是被截断的内容，是马上就到的
       const bottom = following.current ? 0 : trailing;
@@ -49,12 +50,17 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
     // 用户一动手就脱离跟随。scroll 事件分不出是谁滚的（弹簧自己也在写 scrollTop），
     // wheel / touch / 按键才是人的意图
     const release = () => {
+      paused.current = element.scrollHeight > element.clientHeight;
       following.current = false;
       cancelAnimationFrame(frame.current);
       frame.current = 0;
       velocity.current = 0;
     };
-    element.addEventListener("scroll", measure, { passive: true });
+    const onScroll = () => {
+      if (!scrollEdges(element, range).end && element.scrollHeight > element.clientHeight) paused.current = false;
+      measure();
+    };
+    element.addEventListener("scroll", onScroll, { passive: true });
     // 内容高度变了也要重量：`measure` 只挂在 scroll 上的话，一次到位的内容（刷新、翻历史、
     // 手动点开源码）永远不会触发它 —— 首帧量的时候 scrollHeight 还等于 clientHeight，
     // `!trailing` 把它当成「已经滚到底」挂上了跟随，于是底边一直不糊，几百行代码看着像到此为止
@@ -66,12 +72,13 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
     element.addEventListener("keydown", release);
     measure();
     return () => {
-      element.removeEventListener("scroll", measure);
+      element.removeEventListener("scroll", onScroll);
       element.removeEventListener("wheel", release);
       element.removeEventListener("touchstart", release);
       element.removeEventListener("keydown", release);
       resize.disconnect();
       cancelAnimationFrame(frame.current);
+      frame.current = 0;
     };
   }, [ref, range]);
 
@@ -80,22 +87,23 @@ export function useTailFollow(ref: React.RefObject<HTMLElement | null>, height: 
     if (!element) return;
     const grew = seen.current > 0 && height > seen.current;
     seen.current = height;
-    if (!grew) return;
+    // New output must not override a reader who paused following; scrolling back to the end resumes it.
+    if (!grew || paused.current) return;
     following.current = true;
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      element.scrollTop = element.scrollHeight - element.clientHeight;
-      return;
-    }
+    const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+    // Even reduced-motion jumps read geometry in the next frame, after the new content has laid out.
     // 已经在跑就不重启：目标是每帧现取的，长出来的新内容自然被追上 ——
     // 生成结束只是不再有新目标，弹簧停在原地，不会「弹回顶部」
     if (frame.current) return;
     position.current = element.scrollTop;
-    const step = () => {
+    let previousTime = performance.now();
+    const step = (time: number) => {
       if (!following.current) return ((frame.current = 0), undefined);
-      const target = element.scrollHeight - element.clientHeight;
+      const target = Math.max(0, element.scrollHeight - element.clientHeight);
+      if (reducedMotion.matches) { element.scrollTop = target; velocity.current = 0; frame.current = 0; return; }
       const distance = target - position.current;
-      velocity.current += (STIFFNESS * distance - DAMPING * velocity.current) / 60;
-      position.current += velocity.current / 60;
+      const next = stepTailSpring(position.current, velocity.current, target, time - previousTime);
+      previousTime = time; position.current = next.position; velocity.current = next.velocity;
       if (Math.abs(distance) < 0.5 && Math.abs(velocity.current) < 2) {
         position.current = target;
         velocity.current = 0;

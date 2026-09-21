@@ -1,13 +1,13 @@
 ---
 title: Usage
-description: Install one macaron-artifacts package and choose Claude Code, Codex, OpenCode, or pi inside the unified WebUI.
+description: Install one macaron-artifacts package and choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw inside the unified WebUI.
 ---
 
-Macaron Artifacts runs Claude Code, Codex, OpenCode, and pi in the same local WebUI. Each conversation selects its own harness, workspace, and optional model.
+Macaron Artifacts runs Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw in the same local WebUI. Each conversation selects its own harness, workspace, and optional model.
 
 ## Install
 
-Macaron Artifacts requires Node.js 22.19 or newer. For Claude Code, Codex, or OpenCode, install and authenticate the native CLI first; the app inherits its local configuration. The pi SDK is included and reads your `~/.pi/agent` configuration, so it needs no separate pi executable.
+Macaron Artifacts requires Node.js 22.19 or newer. Install and authenticate Claude Code, Codex, or OpenCode before starting the app; it inherits their local configuration. The pi SDK is included and reads `~/.pi/agent`, while Hermes and OpenClaw connect through their configured gateways.
 
 Run this commit's preview package:
 
@@ -24,6 +24,30 @@ macaron-artifacts
 
 Open [http://127.0.0.1:43860](http://127.0.0.1:43860). The commands are pinned to this documentation build's commit; use a commit with a successful package preview build.
 
+### Password protection and remote access
+
+Use `MACARON_PASSWORD` or `--password` on the machine running your coding agents. To read a password without echoing it or adding it to shell history:
+
+```sh
+printf 'Artifacts password: '
+read -r -s MACARON_PASSWORD
+printf '\n'
+export MACARON_PASSWORD
+macaron-artifacts
+```
+
+You can also run `macaron-artifacts --password "$MACARON_PASSWORD"`. CLI passwords can appear in shell history and process arguments.
+
+For an SSH machine, run this command on your computer, then open `http://127.0.0.1:43860` and enter the password:
+
+```sh
+ssh -N -L 43860:127.0.0.1:43860 user@host
+```
+
+The agents, their credentials, and workspace files stay on the server. A configured password applies to loopback access too. Without one, the default local-only launch behaves as before. Login lasts 24 hours in an HttpOnly, SameSite=Strict cookie; signing out or restarting the server invalidates it. The shared password grants access to the whole service, including all conversations, workspaces, and Profile settings.
+
+For direct access through an HTTPS reverse proxy, pass `--public-origin https://artifacts.example.com` or set `MACARON_PUBLIC_ORIGIN=https://artifacts.example.com`, proxy to `127.0.0.1:43860`, and preserve the browser's `Host` header. The server ignores `X-Forwarded-*` headers for trust and uses Secure cookies for that HTTPS origin. If the backend needs to listen on a network interface, use `--host 0.0.0.0` or `MACARON_HOST`. A non-loopback listen address or public origin requires a non-empty password. Use HTTPS or SSH forwarding to encrypt the connection; password protection alone does not encrypt HTTP.
+
 ### Connect from the website
 
 Run `macaron-artifacts --pair` on the machine that has your coding agents installed. On [the connect page](/connect), enter `http://127.0.0.1:43860` and the one-time code printed by the command. The code expires after ten minutes and is consumed once; credentials stay in the browser tab and the agent machine.
@@ -36,14 +60,16 @@ ssh -N -L 43860:127.0.0.1:43860 user@host
 
 Then use the forwarded `http://127.0.0.1:43860` address in the connect form. The website never needs direct network access to the remote machine.
 
+Pairing is a separate authorization method: an origin-bound Bearer grant allows the paired WebUI to use the service without a password cookie. It cannot access password endpoints or manage other pairing grants. When password protection is enabled, the same-origin WebUI must log in before managing pairing codes or connections.
+
 <Callout title="One package, one launcher">
-  `macaron-artifacts` is the only published package and CLI. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Claude Code, Codex, OpenCode, and pi are selected inside the app. Kimi Code, Hermes, and dsh are not supported in this release.
+  `macaron-artifacts` is the only package and CLI. Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw are selected inside the app. OpenClaw metadata enrichment requires the Macaron metadata-gate plugin and fails closed without it.
 </Callout>
 
 ## Start a conversation
 
 1. Select **New conversation** and enter your workspace directory.
-2. Choose **Claude Code**, **Codex**, **OpenCode**, or **pi**. Leave the model field empty to use that harness's default. OpenCode and pi accept an optional `provider/model` override.
+2. Choose **Claude Code**, **Codex**, **OpenCode**, **pi**, **Hermes**, or **OpenClaw**. Leave the model field empty to use that harness's default. OpenCode and pi accept an optional `provider/model` override.
 3. Send a message. Text, reasoning, and supported tool events stream into the conversation.
 4. Respond to approval requests in the chat when they appear. For pi, the host gates tool execution through its SDK hook.
 
@@ -51,14 +77,14 @@ Switching conversations keeps background turns running. Refreshing reconnects to
 
 Streaming follows each harness's native events. OpenCode exposes text/reasoning deltas and tool input snapshots. pi also exposes raw tool argument deltas; its command output arrives as cumulative updates.
 
-OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported here. Tool execution approvals appear in the conversation.
+OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported here. Hermes and OpenClaw gateway prompts that require an external client are likewise outside the WebUI; tool execution approvals appear in the conversation.
 
 ## Generated UI
 
 - An inline `ui4a/tsx` fenced module renders inside its assistant message as the source arrives.
 - A file at `.artifacts/canvases/<name>.ui4a.tsx` opens in **Canvas**. Relative TypeScript, TSX, and JSON imports resolve inside `.artifacts`.
 - The small `$ui4a/ui` component library shares the app's theme. Separate `$ui4a/chat`, `$ui4a/state`, and `$ui4a/fs` modules provide scoped host capabilities.
-- Choose a Shiki theme from the sidebar; both syntax highlighting and interface colors follow it.
+- Choose a paired Shiki theme family from the sidebar; its light or dark variant follows the site appearance, and both syntax highlighting and interface colors follow it.
 
 Workspace files remain in the selected directory. Deleting a conversation does not delete those files. Existing native session-history migration and attachments are not included in this version.
 
@@ -69,20 +95,29 @@ macaron-artifacts --port 43860 --data-dir /path/to/session-data
 macaron-artifacts --help
 ```
 
+CLI options override their environment variables.
+
 | Variable | Purpose |
 | --- | --- |
 | `MACARON_PORT` | UI and API port, default `43860` |
+| `MACARON_HOST` | Listen address, default `127.0.0.1`; also accepted as `--host` |
+| `MACARON_PASSWORD` | Shared service password; also accepted as `--password`; required for non-loopback listening or public origins |
+| `MACARON_PUBLIC_ORIGIN` | Exact browser origin behind a reverse proxy, for example `https://artifacts.example.com`; also accepted as `--public-origin` |
 | `MACARON_DATA_DIR` | Conversation storage, default `~/.macaron-artifacts/sessions` |
 | `MACARON_CLAUDE_PATH` | Claude Code executable |
 | `MACARON_CODEX_PATH` | Codex executable |
 | `MACARON_OPENCODE_PATH` | OpenCode executable |
 | `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
+| `MACARON_HERMES_PATH` | Hermes executable |
+| `MACARON_HERMES_URL` | Optional Hermes gateway URL |
+| `MACARON_OPENCLAW_PATH` | OpenClaw executable |
+| `OPENCLAW_GATEWAY_URL` | Optional OpenClaw gateway URL |
 | `MACARON_PAIR` | Enable one-time hosted WebUI pairing (`1` or `true`) |
 | `MACARON_ALLOWED_ORIGINS` | Comma-separated allowed website origins |
 
 For a custom Claude gateway, launch with the same `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` environment as your CLI. Environment variables set only inside a shell alias do not reach a separately launched app.
 
-The API binds to loopback and accepts same-origin browser requests. Generated React runs in the host page; use it with trusted local code.
+The API binds to loopback by default and accepts same-origin browser requests. A configured password protects the API even on loopback. Generated React runs in the host page; use it with trusted code.
 
 ## Update
 

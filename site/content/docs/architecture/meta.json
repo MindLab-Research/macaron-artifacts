@@ -1,13 +1,5 @@
 {
   "title": "Architecture",
-  "description": "How Macaron Artifacts is built — server, web, GenUI, and packaging.",
-  "pages": [
-    "overview",
-    "server",
-    "web",
-    "genui",
-    "codex",
-    "kimi",
-    "packaging"
-  ]
+  "description": "The unified server, React WebUI, harness adapters, UI4A runtime, and package boundary.",
+  "pages": ["overview", "server", "web", "genui", "codex", "packaging"]
 }

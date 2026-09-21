@@ -1,0 +1,36 @@
+@property --reasoning-fade-top { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --reasoning-fade-bottom { syntax: '<number>'; inherits: true; initial-value: 0; }
+
+.reasoning { min-width: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.reasoning-main { min-width: 0; }
+.reasoning-viewport { max-height: min(14rem, 36svh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; transition: --reasoning-fade-top 140ms ease, --reasoning-fade-bottom 140ms ease; mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(1 - var(--reasoning-fade-top))) 0, #000 16px, #000 calc(100% - 16px), rgb(0 0 0 / calc(1 - var(--reasoning-fade-bottom))) 100%); }
+.reasoning[data-reasoning-kind='summary'] .reasoning-viewport { max-height: min(10rem, 30svh); }
+.reasoning-content { min-width: 0; overflow-wrap: anywhere; padding-block: 4px; }
+.reasoning-content [data-reasoning-entry]:not([hidden]) ~ [data-reasoning-entry]:not([hidden]) { margin-top: .75rem; }
+.reasoning-content :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) { margin: 0; font-size: inherit; }
+.reasoning-content :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) + :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre) { margin-top: .5rem; }
+.reasoning-content :where(strong, [data-streamdown='strong'], h1, h2, h3, h4, h5, h6) { color: var(--fg); font-weight: 500; }
+.reasoning-content [data-reasoning-latest='false'] :where(strong, [data-streamdown='strong']) { color: inherit; font-weight: 400; }
+.reasoning-content [data-reasoning-latest='true'] :where(strong, [data-streamdown='strong']) { font-weight: 600; }
+.reasoning-content :where(ul, ol) { padding-left: 1.25rem; }
+.reasoning-content [data-streamdown='unordered-list'] { list-style: disc; }
+.reasoning-content [data-streamdown='ordered-list'] { list-style: decimal; }
+.reasoning-content :where(pre, code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+.reasoning-content a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.reasoning-content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.reasoning-content [data-streamdown='code-block'] { background: transparent; border: 0; border-radius: 0; }
+.reasoning-content [data-streamdown='code-block-header'] { display: none; }
+.reasoning-content [data-streamdown='code-block-body'] { padding: 0; }
+.reasoning-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; margin-top: .25rem; min-height: 24px; }
+.reasoning-action { display: inline-flex; align-items: center; gap: .25rem; min-height: 24px; padding: 0 .125rem; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.reasoning-action-icon { width: 14px; height: 14px; flex: none; }
+.reasoning-action[data-open] .reasoning-action-icon { transform: rotate(180deg); }
+.reasoning-resume { margin-left: auto; }
+.reasoning :focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
+/* Keep the keyboard outline outside the masked scroll plane so the edge fade cannot erase it. */
+.reasoning-viewport:focus-visible { outline: none; }
+.reasoning-main:has(> .reasoning-viewport:focus-visible) { outline: 2px solid var(--focus, var(--accent)); outline-offset: 3px; border-radius: 3px; }
+.reasoning-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (hover: hover) { .reasoning-action:hover { color: var(--fg); } }
+@media (pointer: coarse) { .reasoning-action { min-height: 44px; padding-inline: .5rem; } }
+@media (prefers-reduced-motion: reduce) { .reasoning *, .reasoning { animation: none !important; transition: none !important; } }

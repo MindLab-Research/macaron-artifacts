@@ -102,5 +102,3 @@ export class PairingManager {
 
 export function bearerToken(value: string | undefined): string | undefined { return value?.startsWith('Bearer ') ? value.slice(7) : undefined; }
 export function isLoopbackHost(value: string | undefined): boolean { if (!value) return false; try { const host = new URL(`http://${value}`).hostname; return host === 'localhost' || host === '::1' || host === '[::1]' || host === '127.0.0.1'; } catch { return false; } }
-export function originHost(value: string | undefined): string | undefined { try { return value ? new URL(value).host : undefined; } catch { return undefined; } }
-export function originProtocol(value: string | undefined): string | undefined { try { return value ? new URL(value).protocol : undefined; } catch { return undefined; } }

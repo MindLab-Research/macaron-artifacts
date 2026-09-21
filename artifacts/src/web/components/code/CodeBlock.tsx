@@ -48,5 +48,5 @@ export function CodeBlock({ code, lang = 'tsx', className = '' }: { code: string
     for (const token of tokens) for (const [index, content] of token.content.split('\n').entries()) { if (index) result.push([]); if (content) result.at(-1)!.push({ ...token, content }); }
     return result;
   }, [tokens]);
-  return <pre ref={mount} tabIndex={0} aria-label="代码" className={`scroll-x m-0 p-3 text-xs leading-5 ${className}`}><code>{tokens.length ? lines.map((line, index) => <Fragment key={index}><CodeLine tokens={line} signature={line.map(token => `${token.content}:${token.color}:${token.fontStyle}`).join('|')} />{index < lines.length - 1 ? '\n' : ''}</Fragment>) : code}</code></pre>;
+  return <pre ref={mount} data-code-language={normalizeLanguage(lang)} data-code-theme={appearance.syntax} tabIndex={0} aria-label="代码" className={`theme-code scroll-x m-0 p-3 text-xs leading-5 ${className}`}><code>{tokens.length ? lines.map((line, index) => <Fragment key={index}><CodeLine tokens={line} signature={line.map(token => `${token.content}:${token.color}:${token.fontStyle}`).join('|')} />{index < lines.length - 1 ? '\n' : ''}</Fragment>) : code}</code></pre>;
 }

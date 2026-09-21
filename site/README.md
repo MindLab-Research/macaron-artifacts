@@ -19,4 +19,4 @@ All locally authored utility classes use UnoCSS `presetWind4`, prefixed with the
 
 Fumadocs' official precompiled `style.css` supplies its dependency-owned components, prose, search, and sidebar styles. The Vite compatibility plugin removes that stylesheet's duplicate reset with PostCSS; it does not compile Tailwind or scan local source. A test guards the vendor reset boundary. Per-module UnoCSS output supports React Router's client and prerender environments, with explicit cascade layer ordering in every CSS chunk.
 
-The navigation palette menu maps bundled Shiki themes to `--color-fd-*` variables and matching code-token themes. Neutral preserves the original Fumadocs colors. Theme preferences stay in browser storage and never enter model prompts.
+The navigation palette menu maps bundled Shiki theme families to `--color-fd-*` variables and matching code-token themes. Paired families select their light or dark variant with the site's appearance; Neutral preserves the original Fumadocs colors. Theme preferences stay in browser storage and never enter model prompts.

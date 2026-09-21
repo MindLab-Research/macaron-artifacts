@@ -10,6 +10,29 @@ import { createSurfaceStyles, UI4A_CLASS } from "./styles";
 let warmup: Promise<void> | null = null;
 export const warmUi4aRuntime = () => (warmup ??= createTsxCompiler().compile("export default function App(){return null}").then(() => undefined).catch(() => { warmup = null; }));
 
+function hasVisibleContent(target: HTMLElement) {
+  const visible = (element: Element) => {
+    const visibility = getComputedStyle(element).visibility;
+    if (visibility === "hidden" || visibility === "collapse") return false;
+    // The host's temporary opacity hides measurement; opacity on generated ancestors is intentional.
+    for (let ancestor: Element | null = element; ancestor && ancestor !== target; ancestor = ancestor.parentElement) if (getComputedStyle(ancestor).opacity === "0") return false;
+    return true;
+  };
+  const text = document.createTreeWalker(target, NodeFilter.SHOW_TEXT), range = document.createRange();
+  for (let node = text.nextNode(); node; node = text.nextNode()) {
+    if (!node.textContent?.trim() || !node.parentElement || !visible(node.parentElement)) continue;
+    range.selectNodeContents(node);
+    const box = range.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0) return true;
+  }
+  for (const element of target.querySelectorAll("*")) {
+    if (!element.localName.includes("-") && !["svg", "canvas", "img", "video", "iframe", "picture", "input", "textarea", "select", "button", "progress", "meter"].includes(element.localName)) continue;
+    const box = element.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0 && visible(element)) return true;
+  }
+  return false;
+}
+
 export type Ui4aSurfaceProps = {
   source: string;
   streaming: boolean;
@@ -46,6 +69,23 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
 
   useEffect(() => {
     const target = host.current;
+    if (!target || painted) return;
+    let frame = 0;
+    const check = () => {
+      frame = 0;
+      // A successful compile can still return an empty function while its JSX is arriving.
+      if (hasVisibleContent(target)) { observer.disconnect(); resize.disconnect(); setPainted(true); }
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(check); };
+    const observer = new MutationObserver(schedule), resize = new ResizeObserver(schedule);
+    observer.observe(target, { childList: true, subtree: true, characterData: true, attributes: true });
+    resize.observe(target);
+    schedule();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); resize.disconnect(); };
+  }, [painted, sessionId, scope, filename]);
+
+  useEffect(() => {
+    const target = host.current;
     if (!target) return;
     let disposed = false;
     setPainted(false);
@@ -64,7 +104,7 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
       callbacks: {
         onReady: (_component, _url, code) => { readySource = code; if (code !== undefined) surfaceDelivery?.ready(code); },
         onError: (error, phase) => { if (!disposed) { surfaceDelivery?.failed(phase === "render" ? readySource : compilingSource, phase); report(error); } },
-        onRendered: (_component, _code, serial) => { if (!disposed) { surfaceDelivery?.rendered(serial); setPainted(true); } },
+        onRendered: (_component, _code, serial) => { if (!disposed) surfaceDelivery?.rendered(serial); },
       },
     }).then((created) => {
       if (disposed) { created.detach(); return; }
@@ -83,8 +123,9 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
     };
   }, [sessionId, scope, filename]);
 
-  return <div className={UI4A_CLASS} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0 }}>
-    <div ref={host} data-ui4a-render-host="" />
+  return <div className={UI4A_CLASS} data-ui4a-ready={painted && !streaming && !error ? "true" : "false"} data-ui4a-scope={scope} data-ui4a-streaming={streaming ? "true" : "false"} style={{ containerType: "inline-size", minWidth: 0, position: "relative" }}>
+    {/* Measure the first real UI without briefly stacking its height on top of the source fallback. */}
+    <div ref={host} data-ui4a-render-host="" inert={!painted} style={painted ? undefined : { position: "absolute", insetInline: 0, top: 0, opacity: 0, pointerEvents: "none" }} />
     {!painted && source ? <CodeBlock code={source} /> : null}
     {error ? <div role="alert" className="mt-2 rounded border border-danger/30 p-3 text-sm text-danger">{error}</div> : null}
   </div>;

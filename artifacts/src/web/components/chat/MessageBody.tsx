@@ -1,12 +1,14 @@
-import { lazy, memo, Suspense, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Streamdown } from 'streamdown';
-import { cjk } from '@streamdown/cjk';
+import { markdownPlugins } from '../../chat/markdown';
+import { normalizeMath } from '../../chat/math';
 import { CodeBlock } from '../code/CodeBlock';
 import { Collapsible } from '../code/Collapsible';
 import { parseSegments } from './segments';
+import { ExportMenu } from '../ExportMenu';
+import { exportRehypePlugins } from '../../chat/export-links';
 
 const Ui4aSurface = lazy(() => import('../../ui4a/Ui4aSurface').then(module => ({ default: module.Ui4aSurface })));
-const PLUGINS = { cjk };
 const ANIMATION = { duration: 300 };
 function Pre({ children }: { children?: ReactNode }) {
   const code = children as ReactElement<{ className?: string; children?: ReactNode }> | undefined;
@@ -16,11 +18,12 @@ const COMPONENTS = { pre: Pre };
 
 export const MessageBody = memo(function MessageBody({ text, messageId, streaming, sessionId, onSend, allowUi = true }: { text: string; messageId: string; streaming: boolean; sessionId: string; onSend: (text: string) => void; allowUi?: boolean }) {
   const segments = useMemo(() => allowUi ? parseSegments(text) : [{ kind: 'markdown' as const, text }], [allowUi, text]);
-  return <div className="flex flex-col gap-3">{segments.map((segment, index) => segment.kind === 'markdown' ? <div key={index} className="md text-sm leading-relaxed"><Streamdown plugins={PLUGINS} components={COMPONENTS} controls={false} animated={ANIMATION} isAnimating={streaming}>{segment.text}</Streamdown></div> : <InlineUi4a key={index} source={segment.code} streaming={streaming && !segment.complete} scope={`${sessionId}:inline:${messageId}:${index}`} sessionId={sessionId} onSend={onSend} />)}</div>;
+  return <div className="flex min-w-0 flex-col gap-3">{segments.map((segment, index) => segment.kind === 'markdown' ? <div key={index} className="md min-w-0 text-sm leading-relaxed"><Streamdown plugins={markdownPlugins} rehypePlugins={exportRehypePlugins} components={COMPONENTS} controls={false} animated={ANIMATION} isAnimating={streaming}>{normalizeMath(segment.text)}</Streamdown></div> : <InlineUi4a key={index} source={segment.code} streaming={streaming && !segment.complete} scope={`${sessionId}:inline:${messageId}:${index}`} sessionId={sessionId} onSend={onSend} />)}</div>;
 });
 
 function InlineUi4a({ source, ...props }: { source: string; streaming: boolean; scope: string; sessionId: string; onSend: (text: string) => void }) {
   const [showSource, setShowSource] = useState(false);
-  const fallback = <div className="overflow-clip rounded-xl bg-surface-2"><Collapsible><CodeBlock code={source} /></Collapsible></div>;
-  return <div className="group relative"><button type="button" onClick={() => setShowSource(value => !value)} className="interactive absolute top-2 right-2 z-10 rounded-lg bg-surface/80 px-2 py-1 text-xs text-muted opacity-0 backdrop-blur-md group-hover:opacity-100 hover:text-fg focus-visible:opacity-100">{showSource ? '预览' : '源码'}</button>{showSource ? fallback : <Suspense fallback={fallback}><Ui4aSurface source={source} {...props} /></Suspense>}</div>;
+  const target = useRef<HTMLDivElement>(null);
+  const fallback = <div className="theme-code overflow-clip rounded-xl"><Collapsible><CodeBlock code={source} /></Collapsible></div>;
+  return <div><div data-export-control className="flex min-h-10 items-center justify-end gap-1"><button type="button" onClick={() => setShowSource(value => !value)} aria-pressed={showSource} className="artifact-source-toggle interactive h-9 rounded-md px-2 text-xs text-muted hover:bg-surface-3 hover:text-hover-fg">{showSource ? '预览' : '源码'}</button><ExportMenu target={target} disabled={props.streaming || showSource} /></div><div ref={target}>{showSource ? fallback : <Suspense fallback={fallback}><Ui4aSurface source={source} {...props} /></Suspense>}</div></div>;
 }

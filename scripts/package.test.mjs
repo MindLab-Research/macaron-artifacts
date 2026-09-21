@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { request } from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -39,10 +40,10 @@ async function reservePort() {
   return port;
 }
 
-async function start(bin, consumer, env, dataDirectory) {
+async function start(bin, consumer, env, dataDirectory, args = []) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const port = await reservePort(), base = `http://127.0.0.1:${port}`;
-    const child = spawn(process.execPath, [bin, '--port', String(port), '--data-dir', dataDirectory], { cwd: consumer, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [bin, '--port', String(port), '--data-dir', dataDirectory, ...args], { cwd: consumer, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '', exited = false, spawnError;
     const append = chunk => { output = (output + chunk.toString()).slice(-12_000); };
     child.stdout.on('data', append); child.stderr.on('data', append);
@@ -60,7 +61,7 @@ async function start(bin, consumer, env, dataDirectory) {
     try {
       const deadline = Date.now() + 20_000;
       while (!exited && !spawnError && Date.now() < deadline) {
-        const health = output.includes(base) ? await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(500) }).catch(() => undefined) : undefined;
+        const health = output.includes('Macaron Artifacts:') ? await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(500) }).catch(() => undefined) : undefined;
         if (health?.ok && (await health.json()).ok === true) return { base, stop };
         await delay(50);
       }
@@ -83,7 +84,7 @@ async function files(directory, prefix = '') {
   return paths;
 }
 
-test('the single published package installs in isolation and serves four harnesses and all client assets', { timeout: 300_000 }, async t => {
+test('the single published package installs in isolation and serves six harnesses and all client assets', { timeout: 300_000 }, async t => {
   const temporary = await mkdtemp(join(tmpdir(), 'macaron-package-'));
   let app;
   t.after(async () => { try { await app?.stop(); } finally { await rm(temporary, { recursive: true, force: true }); } });
@@ -105,6 +106,7 @@ test('the single published package installs in isolation and serves four harness
   await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'artifacts-package-consumer', private: true }));
   const env = { ...process.env };
   delete env.NODE_PATH; delete env.NODE_OPTIONS;
+  for (const key of ['MACARON_HOST', 'MACARON_PASSWORD', 'MACARON_PUBLIC_ORIGIN', 'MACARON_PAIR', 'MACARON_ALLOWED_ORIGINS']) delete env[key];
   env.PI_CODING_AGENT_DIR = join(temporary, 'pi-agent');
   await mkdir(env.PI_CODING_AGENT_DIR);
   await run('npm', ['install', source, '--omit=dev', '--ignore-scripts=false', '--no-audit', '--no-fund', '--prefer-offline'], consumer, env);
@@ -126,17 +128,19 @@ test('the single published package installs in isolation and serves four harness
   for (const legacy of ['mcc', 'mcx', 'mkx']) await assert.rejects(access(join(consumer, 'node_modules', '.bin', legacy)), { code: 'ENOENT' });
   const help = await run(process.execPath, [bin, '--help'], consumer, env);
   assert.match(help, /Usage: macaron-artifacts/); assert.match(help, /Claude Code.*Codex.*OpenCode.*pi/);
+  for (const option of ['--host', '--password', '--public-origin', 'MACARON_HOST', 'MACARON_PASSWORD', 'MACARON_PUBLIC_ORIGIN']) assert.ok(help.includes(option), `Installed launcher must document ${option}`);
 
   // CLI availability uses --version stubs; pi availability only imports its bundled
   // SDK. Creating app sessions below does not start a native turn or call a provider.
   const cli = join(temporary, 'native-version-stub');
   await writeFile(cli, `#!${process.execPath}\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(91);\nconsole.log('package-smoke-native 1.0.0');\n`, { mode: 0o755 });
-  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_OPENCODE_PATH = cli;
+  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_OPENCODE_PATH = cli; env.MACARON_HERMES_PATH = cli; env.MACARON_OPENCLAW_PATH = cli;
   const guidance = await readFile(join(installed, 'artifacts/skills/ui4a/SKILL.md'), 'utf8');
   assert.match(guidance, /ui4a\/tsx/); assert.match(guidance, /\$ui4a\/ui/); assert.match(guidance, /\.artifacts\//);
   app = await start(bin, consumer, env, join(temporary, 'sessions'));
+  assert.deepEqual(await (await fetch(`${app.base}/api/auth`)).json(), { enabled: false, authenticated: true });
   const harnesses = await (await fetch(`${app.base}/api/harnesses`)).json();
-  assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'opencode', 'pi']);
+  assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'hermes', 'openclaw', 'opencode', 'pi']);
   for (const harness of harnesses) {
     assert.equal(harness.available, true, `${harness.id} must be available from its CLI stub or bundled SDK`);
     assert.match(harness.detail, harness.id === 'pi' ? /^pi SDK \S+/ : /package-smoke-native/);
@@ -157,5 +161,48 @@ test('the single published package installs in isolation and serves four harness
     const actual = createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
     assert.equal(actual, expected, `${path} must be served intact from the installed package`);
   }));
-  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, four harnesses, OpenCode and pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files`);
+  await app.stop(); app = undefined;
+  // Run the installed launcher, not its source, so a missing CLI-to-server option
+  // or packaged authentication module cannot pass a unit-only security check.
+  await assert.rejects(run(process.execPath, [bin, '--host', '0.0.0.0'], consumer, env), /MACARON_PASSWORD/);
+  await assert.rejects(run(process.execPath, [bin], consumer, { ...env, MACARON_PUBLIC_ORIGIN: 'https://artifacts.example' }), /MACARON_PASSWORD/);
+  const protectedEnv = { ...env, MACARON_PASSWORD: 'package-smoke-password' }, protectedData = join(temporary, 'protected-sessions');
+  app = await start(bin, consumer, protectedEnv, protectedData, ['--host', '0.0.0.0']);
+  assert.deepEqual(await (await fetch(`${app.base}/api/health`)).json(), { ok: true });
+  assert.deepEqual(await (await fetch(`${app.base}/api/auth`)).json(), { enabled: true, authenticated: false });
+  for (const path of ['/api/harnesses', '/api/sessions', '/api/profiles', '/api/pair/connections']) {
+    const denied = await fetch(`${app.base}${path}`);
+    assert.equal(denied.status, 401, `${path} must require a password even through loopback`);
+    assert.equal((await denied.json()).passwordRequired, true);
+  }
+  const login = async password => fetch(`${app.base}/api/auth/login`, { method: 'POST', headers: { origin: app.base, 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+  const invalid = await login('wrong-password');
+  assert.equal(invalid.status, 401); assert.equal(invalid.headers.get('set-cookie'), null);
+  const authenticated = await login(protectedEnv.MACARON_PASSWORD), setCookie = authenticated.headers.get('set-cookie');
+  assert.equal(authenticated.status, 200); assert.deepEqual(await authenticated.json(), { enabled: true, authenticated: true });
+  assert.ok(setCookie); assert.match(setCookie, /(?:^|;)\s*HttpOnly(?:;|$)/i); assert.match(setCookie, /(?:^|;)\s*SameSite=Strict(?:;|$)/i);
+  assert.match(setCookie, /(?:^|;)\s*Path=\/(?:;|$)/i); assert.match(setCookie, /(?:^|;)\s*Max-Age=86400(?:;|$)/i); assert.ok(!setCookie.includes(protectedEnv.MACARON_PASSWORD));
+  const cookie = setCookie.split(';', 1)[0];
+  assert.deepEqual(await (await fetch(`${app.base}/api/auth`, { headers: { cookie } })).json(), { enabled: true, authenticated: true });
+  assert.equal((await fetch(`${app.base}/api/sessions`, { headers: { cookie } })).status, 200);
+  const logout = await fetch(`${app.base}/api/auth/logout`, { method: 'POST', headers: { origin: app.base, cookie } });
+  assert.equal(logout.status, 200); assert.deepEqual(await logout.json(), { enabled: true, authenticated: false });
+  assert.match(logout.headers.get('set-cookie'), /(?:^|;)\s*Max-Age=0(?:;|$)/i);
+  assert.equal((await fetch(`${app.base}/api/sessions`, { headers: { cookie } })).status, 401);
+  const relogin = await login(protectedEnv.MACARON_PASSWORD);
+  assert.equal(relogin.status, 200);
+  const previousCookie = relogin.headers.get('set-cookie').split(';', 1)[0];
+  await app.stop(); app = undefined;
+  const cliPassword = 'CLI password with spaces 中文';
+  app = await start(bin, consumer, { ...protectedEnv, MACARON_PUBLIC_ORIGIN: 'https://ignored.example' }, protectedData, ['--password', cliPassword, '--public-origin', 'https://artifacts.example']);
+  assert.equal((await fetch(`${app.base}/api/sessions`, { headers: { cookie: previousCookie } })).status, 401, 'Restart must invalidate existing browser sessions');
+  assert.equal((await login(protectedEnv.MACARON_PASSWORD)).status, 401, 'The command-line password must override the environment');
+  // Node fetch rewrites Host, so use http.request to reproduce a proxy preserving the browser's Host.
+  const proxyLogin = await new Promise((resolveLogin, reject) => {
+    const req = request(`${app.base}/api/auth/login`, { method: 'POST', headers: { host: 'artifacts.example', origin: 'https://artifacts.example', 'content-type': 'application/json' } }, res => { res.resume(); res.once('end', () => resolveLogin(res)); });
+    req.on('error', reject); req.end(JSON.stringify({ password: cliPassword }));
+  });
+  assert.equal(proxyLogin.statusCode, 200, 'The command-line public origin must override the environment');
+  assert.match(proxyLogin.headers['set-cookie'][0], /; Secure/);
+  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, six harnesses, OpenCode/pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files, password login/logout, restart invalidation, required remote password, CLI/environment precedence`);
 });

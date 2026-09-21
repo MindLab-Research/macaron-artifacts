@@ -1,50 +1,34 @@
 ---
 title: Packaging
-description: One macaron-artifacts package, one CLI, and a prebuilt unified WebUI published per commit.
+description: One macaron-artifacts package, one CLI, and a prebuilt unified WebUI.
 ---
 
-The repository root publishes one package: **`macaron-artifacts`**. Its only CLI is **`macaron-artifacts`**, implemented by `bin/macaron-artifacts.mjs`. Claude Code, Codex, OpenCode, and pi are adapters selected inside the same application.
+The repository root publishes exactly one package: **`macaron-artifacts`**. Its only CLI is `bin/macaron-artifacts.mjs`; choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw inside the running application.
 
 ## Package contents
 
-The package ships the launcher, `artifacts/dist`, the UI4A skill, and the README. Its server and web assets are built before packaging, so starting the installed app does not invoke Vite or compile the application.
-
-The launcher starts the bundled server, which serves both the UI and API on `http://127.0.0.1:43860`. It accepts `--port` and `--data-dir`. Claude Code, Codex, and OpenCode use installed native executables and local authentication; `MACARON_CLAUDE_PATH`, `MACARON_CODEX_PATH`, and `MACARON_OPENCODE_PATH` select the executables. The package includes the pi SDK, which reads `~/.pi/agent` or `PI_CODING_AGENT_DIR` without a separate pi executable.
-
-The package requires Node.js 22.19 or newer. Its runtime dependencies, including the OpenCode and pi SDKs, are declared by the published package; development-only tools stay out of the installation path.
-
-## Per-commit releases
-
-`.github/workflows/pkg-pr-new.yml` builds and publishes only the repository root:
-
-```sh
-pnpm exec pkg-pr-new publish --no-compact --bin .
-```
-
-The preview URL uses the same package name for every harness:
+The package contains the launcher, the prebuilt `artifacts/dist` server and WebUI, the generated UI4A skill, and the current README. Starting the installed package does not invoke Vite or compile source files.
 
 ```sh
 bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
 ```
 
-The docs replace `<sha>` with the current build's short commit SHA using `VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA`, or the local Git revision. Use a commit with a successful package preview build.
+Use a SHA from a successful package preview build. The launcher serves UI and API on `http://127.0.0.1:43860` by default and accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`. CLI options override their environment variables. Set `MACARON_PASSWORD` or pass `--password` for password protection; non-loopback listening or a non-loopback public origin requires it. See [remote access](/docs/usage#password-protection-and-remote-access) for SSH forwarding and HTTPS reverse proxy configuration.
 
-<Callout title="Distribution boundary">
-  The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Their source and plugin launchers are archived on the [`v0` branch](https://github.com/MindLab-Research/macaron-artifacts/tree/v0). Start with [Usage](/docs/usage) for the current installation flow.
-</Callout>
-
-## Application modules
+## Runtime boundary
 
 | Module | Responsibility |
 | --- | --- |
-| `artifacts/src/server/harnesses` | Native harness lifecycle and conversion to AI SDK UI message chunks |
-| `artifacts/src/server/conversations.ts` | Shared turn lifecycle, streaming, approvals, and persistence |
-| `artifacts/src/server/enrichment.ts` | Independent title and follow-up generation on disposable native forks |
-| `artifacts/src/web/chat` | One persistent Chat instance per conversation, queueing, and reconnection |
-| `artifacts/src/web/ui4a` | Incremental rendering, scoped capabilities, relative imports, and state |
-| `artifacts/src/web/components/ui4a-ui.tsx` | Six lightweight components for the interface and generated UI |
-| `artifacts/src/web/theme` | Shiki themes mapped to shared semantic interface colors |
+| `artifacts/src/server/harnesses` | Native lifecycle and event normalization for six harnesses |
+| `artifacts/src/server/conversations.ts` | Turn lifecycle, streaming, approvals, cancellation, and persistence |
+| `artifacts/src/server/profiles.ts` | Private Profile storage and per-turn resolution |
+| `artifacts/src/server/pairing.ts` | One-time hosted WebUI pairing grants |
+| `artifacts/src/web/chat` | Stable per-session Chat instances and reconnection |
+| `artifacts/src/web/ui4a` | Progressive inline and Canvas rendering |
+| `artifacts/src/web/theme` | Shiki workbench roles and semantic interface tokens |
 
-An additional harness implements `HarnessAdapter` and declares the events it supports. It does not require another package, launcher, or SPA.
+A new harness implements `HarnessAdapter` and registers its capabilities. It does not add another package, launcher, SPA, sidebar, or Canvas path.
 
-Components follow `ui4a-playground`'s lightweight Headless UI and Wind4 approach. This application adds its own small `$ui4a/ui` library: Button, Field, Card, Badge, Tabs, and Disclosure. Layout uses native HTML and UnoCSS `presetWind4`; additional controls and charts import directly from `@headlessui/react` and `recharts`. The module manifest generates the unified app's UI4A skill so model guidance follows the runtime contract.
+## Release and updates
+
+`.github/workflows/pkg-pr-new.yml` publishes the root package for each preview commit. Install a newer successful preview URL to update the application; conversation data remains in `MACARON_DATA_DIR`.

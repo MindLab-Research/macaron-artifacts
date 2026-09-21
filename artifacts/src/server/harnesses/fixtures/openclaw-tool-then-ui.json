@@ -1,0 +1,190 @@
+[
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "sessionId": "93dff3d8-4681-435b-8621-6ba17e8d5fbc",
+      "agentId": "main",
+      "stream": "lifecycle",
+      "data": {
+        "phase": "start",
+        "startedAt": 1789870884661
+      },
+      "seq": 1,
+      "ts": 1789870884661
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "stream": "usage",
+      "data": {
+        "outputTokens": 200
+      },
+      "agentId": "main",
+      "seq": 2,
+      "ts": 1789870884974
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "stream": "item",
+      "data": {
+        "itemId": "tool:probe71640197a0361",
+        "phase": "start",
+        "kind": "tool",
+        "title": "write to /smoke/workspace/.artifacts/canvases/openclaw-docker-probe.ui4a.tsx (366 chars)",
+        "status": "running",
+        "name": "write",
+        "meta": "to /smoke/workspace/.artifacts/canvases/openclaw-docker-probe.ui4a.tsx (366 chars)",
+        "commandBearing": false,
+        "toolCallId": "probe71640197a0361",
+        "startedAt": 1789870885004
+      },
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "agentId": "main",
+      "seq": 4,
+      "ts": 1789870885014
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "stream": "item",
+      "data": {
+        "itemId": "tool:probe71640197a0361",
+        "phase": "end",
+        "kind": "tool",
+        "title": "write to /smoke/workspace/.artifacts/canvases/openclaw-docker-probe.ui4a.tsx (366 chars)",
+        "status": "completed",
+        "name": "write",
+        "meta": "to /smoke/workspace/.artifacts/canvases/openclaw-docker-probe.ui4a.tsx (366 chars)",
+        "commandBearing": false,
+        "toolCallId": "probe71640197a0361",
+        "startedAt": 1789870885004,
+        "endedAt": 1789870885081
+      },
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "agentId": "main",
+      "seq": 6,
+      "ts": 1789870885081
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "stream": "assistant",
+      "data": {
+        "text": "INLINE_baseline-events_TURN_1\n\n```ui4a/tsx\nimport { useState } from 'react';\nexport default function OpenClawInlineProbe() { const [count, setCount] = useState(0); return <section className=\"p-3 space-y-2\"><p>Inline OpenClaw turn 1</p><button className=\"px-3 py-2 rounded bg-accent text-accent-fg\" onClick={() => setCount(count + 1)}>Inline count {count}</button></section>; }",
+        "delta": "INLINE_baseline-events_TURN_1\n\n```ui4a/tsx\nimport { useState } from 'react';\nexport default function OpenClawInlineProbe() { const [count, setCount] = useState(0); return <section className=\"p-3 space-y-2\"><p>Inline OpenClaw turn 1</p><button className=\"px-3 py-2 rounded bg-accent text-accent-fg\" onClick={() => setCount(count + 1)}>Inline count {count}</button></section>; }",
+        "itemId": "05ca2a31-7cdc-49be-a4ff-2a4bfec0f381:2"
+      },
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "agentId": "main",
+      "seq": 7,
+      "ts": 1789870885300
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "stream": "assistant",
+      "data": {
+        "text": "INLINE_baseline-events_TURN_1\n\n```ui4a/tsx\nimport { useState } from 'react';\nexport default function OpenClawInlineProbe() { const [count, setCount] = useState(0); return <section className=\"p-3 space-y-2\"><p>Inline OpenClaw turn 1</p><button className=\"px-3 py-2 rounded bg-accent text-accent-fg\" onClick={() => setCount(count + 1)}>Inline count {count}</button></section>; }\n```\n\nThe canvas was updated.",
+        "delta": "\n```\n\nThe canvas was updated.",
+        "itemId": "05ca2a31-7cdc-49be-a4ff-2a4bfec0f381:2"
+      },
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "agentId": "main",
+      "seq": 8,
+      "ts": 1789870885322
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "stream": "usage",
+      "data": {
+        "outputTokens": 400
+      },
+      "agentId": "main",
+      "seq": 9,
+      "ts": 1789870885350
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "sessionId": "93dff3d8-4681-435b-8621-6ba17e8d5fbc",
+      "agentId": "main",
+      "stream": "lifecycle",
+      "data": {
+        "phase": "finishing",
+        "stopReason": "stop",
+        "aborted": false,
+        "livenessState": "working",
+        "replayInvalid": true,
+        "endedAt": 1789870885399
+      },
+      "seq": 10,
+      "ts": 1789870885400
+    }
+  },
+  {
+    "event": "agent",
+    "payload": {
+      "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+      "stream": "lifecycle",
+      "data": {
+        "phase": "end",
+        "startedAt": 1789870883182,
+        "endedAt": 1789870885525,
+        "aborted": false,
+        "stopReason": "stop",
+        "replayInvalid": true,
+        "livenessState": "working",
+        "executionSettled": true,
+        "terminalReceipt": {
+          "runId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+          "sessionId": "93dff3d8-4681-435b-8621-6ba17e8d5fbc",
+          "turnId": "c57beabb-7fd0-4109-b8c0-d83d4a058504",
+          "requested": {
+            "provider": "smoke",
+            "model": "test"
+          },
+          "effective": {
+            "provider": "smoke",
+            "model": "test",
+            "responseModel": "test"
+          },
+          "successfulToolNames": [
+            "write"
+          ],
+          "rerouted": false,
+          "terminalDisposition": "visible"
+        },
+        "terminalReply": {
+          "disposition": "visible",
+          "text": "INLINE_baseline-events_TURN_1\n\n```ui4a/tsx\nimport { useState } from 'react';\nexport default function OpenClawInlineProbe() { const [count, setCount] = useState(0); return <section className=\"p-3 space-y-2\"><p>Inline OpenClaw turn 1</p><button className=\"px-3 py-2 rounded bg-accent text-accent-fg\" onClick={() => setCount(count + 1)}>Inline count {count}</button></section>; }\n```\n\nThe canvas was updated."
+        }
+      },
+      "sessionKey": "agent:main:dashboard:c284f74c-0727-46ec-8e7c-18254d65babe",
+      "sessionId": "93dff3d8-4681-435b-8621-6ba17e8d5fbc",
+      "agentId": "main",
+      "seq": 11,
+      "ts": 1789870885525
+    }
+  }
+]

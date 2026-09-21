@@ -4,9 +4,13 @@ packages:
 pmOnFail: download
 # Keep local resolutions aligned with pnpm's CI release-age policy.
 minimumReleaseAge: 1440
-# partial-tsx is a URL subdep of partial-react (our own pkg.pr.new package), already pinned in the lockfile and trusted.
-# pnpm 10.26+ defaults blockExoticSubdeps=true, which blocks URL subdeps; allow it explicitly here.
-blockExoticSubdeps: false
+# First official gateway SDK release; pin both reviewed artifacts without relaxing other dependencies.
+minimumReleaseAgeExclude:
+  - '@openclaw/gateway-client@2026.9.3'
+  - '@openclaw/gateway-protocol@2026.9.3'
+  # Reviewed GenUI releases replace the pinned previews before their 24-hour release-age cutoff.
+  - 'partial-react@0.0.7'
+  - 'partial-tsx@0.0.4'
 allowBuilds:
   '@google/genai': false
   esbuild: true

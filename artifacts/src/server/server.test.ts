@@ -262,6 +262,17 @@ test('a slow metadata fork cannot block the next user turn or write late metadat
   expect(saved.messages).toHaveLength(4); expect(saved.title).not.toBe('STALE'); expect(saved.suggestions).toEqual([]);
 });
 
+test('a new turn waits for Hermes metadata cancellation to release its native session', async () => {
+  const started = deferred(), cleanup = deferred(); let mainRuns = 0, secondFinished = false;
+  const { post, session } = await setup(async function* (turn) {
+    if (turn.enrichment) { started.resolve(); await aborted(turn.signal); await cleanup.promise; return; }
+    mainRuns++; turn.onNativeSession('native'); yield { type: 'text-start', id: 'text' }; yield { type: 'text-delta', id: 'text', delta: `answer ${mainRuns}` }; yield { type: 'text-end', id: 'text' };
+  });
+  await (await post('/api/chat', { id: session.id, messages: [message('u1', 'First')] })).text(); await started.promise;
+  const second = post('/api/chat', { id: session.id, messages: [message('u2', 'Second')] }).then(async response => { await response.text(); secondFinished = true; return response; });
+  await new Promise(resolve => setTimeout(resolve, 10)); expect(secondFinished).toBe(false); cleanup.resolve(); expect((await second).status).toBe(200); expect(mainRuns).toBe(2);
+});
+
 test('stop during metadata preserves the successful main turn and closes metadata SSE', async () => {
   const started = deferred(); let metadataSignal: AbortSignal | undefined;
   const { post, session, base, app } = await setup(async function* (turn) {

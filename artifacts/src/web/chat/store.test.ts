@@ -8,6 +8,41 @@ const session = (id: string): Session => ({ id, harness: 'claude-code', cwd: '/w
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('persistent session chat connections', () => {
+  test('locking the UI during initialization cannot start session connections afterward', async () => {
+    const requests: string[] = []; let release!: (response: Response) => void;
+    globalThis.fetch = (async input => {
+      const path = String(input); requests.push(path);
+      return path === '/api/sessions' ? new Promise<Response>(resolve => { release = resolve; }) : Response.json([]);
+    }) as typeof fetch;
+    const store = new WorkspaceStore(), initialization = store.initialize();
+    store.dispose(); release(Response.json([session('first')])); await initialization;
+    expect(requests).toEqual(['/api/sessions', '/api/harnesses']); expect(store.chat('first')).toBeUndefined();
+  });
+
+  test('locking the UI detaches browser streams and discards queued prompts without stopping a native turn', async () => {
+    const first = session('first'), requests: string[] = []; let metadataSignal: AbortSignal | null | undefined, chatSignal: AbortSignal | null | undefined;
+    globalThis.fetch = (async (input, init) => {
+      const path = String(input); requests.push(path);
+      if (path === '/api/harnesses' || path.endsWith('/artifacts')) return Response.json([]);
+      if (path === '/api/sessions') return Response.json([first]);
+      if (path.endsWith('/metadata')) {
+        metadataSignal = init?.signal;
+        return new Response(new ReadableStream({ start(controller) { init?.signal?.addEventListener('abort', () => controller.close(), { once: true }); } }));
+      }
+      if (path === '/api/chat') {
+        chatSignal = init?.signal;
+        return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('data: {"type":"start","messageId":"answer"}\n\n')); init?.signal?.addEventListener('abort', () => controller.close(), { once: true }); } }), { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } });
+      }
+      return Response.json(first);
+    }) as typeof fetch;
+    const store = new WorkspaceStore(); await store.initialize(); await tick();
+    store.send('first', 'first question'); await tick(); store.send('first', 'queued question');
+    store.dispose(); await tick(); await tick();
+    expect(metadataSignal?.aborted).toBe(true); expect(chatSignal?.aborted).toBe(true);
+    expect(store.queue('first')).toEqual([]); expect(requests.filter(path => path === '/api/chat')).toHaveLength(1);
+    expect(requests.some(path => path.endsWith('/stop'))).toBe(false);
+  });
+
   test('drafts belong to sessions and keystrokes do not publish the workspace snapshot', () => {
     const store = new WorkspaceStore(), snapshot = store.getSnapshot();
     let firstUpdates = 0, secondUpdates = 0;

@@ -1,0 +1,1 @@
+{"id":"macaron-artifacts-metadata-gate","name":"Macaron Artifacts Metadata Gate","description":"Blocks tool execution in Macaron metadata forks.","version":"0.1.0","contracts":{"trustedToolPolicies":["macaron-metadata-gate"]},"activation":{"onStartup":true},"configSchema":{"type":"object","additionalProperties":false}}

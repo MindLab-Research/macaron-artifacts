@@ -63,11 +63,44 @@
   --genui: #e08159;
 }
 
-/* The default Fumadocs sidebar specializes Neutral. Selected Shiki palettes inherit the same host tokens everywhere. */
-:root[data-palette] #nd-sidebar {
-  --color-fd-muted: inherit;
-  --color-fd-secondary: inherit;
-  --color-fd-muted-foreground: inherit;
+/* Navigation is a reading aid: reserve chromatic text for content links and use
+   native workbench selection pairs instead of tinting rows with button fills. */
+:root[data-palette] :is(#nd-sidebar, #nd-sidebar-mobile) {
+  border-color: var(--color-fd-contrast-border);
+  /* The sidebar paints itself with `bg-fd-card`; retint that token instead of stacking a background. */
+  --color-fd-card: var(--color-fd-sidebar-bg);
+  --color-fd-background: var(--color-fd-sidebar-bg);
+  --color-fd-muted: var(--color-fd-sidebar-bg);
+  --color-fd-secondary: var(--color-fd-sidebar-bg);
+  --color-fd-foreground: var(--color-fd-sidebar-fg);
+  --color-fd-muted-foreground: var(--color-fd-sidebar-muted);
+  --color-fd-primary: var(--color-fd-sidebar-selection-fg);
+  --color-fd-accent: var(--color-fd-sidebar-hover);
+  --color-fd-accent-foreground: var(--color-fd-sidebar-hover-fg);
+  --color-fd-ring: var(--color-fd-sidebar-focus);
+}
+:root[data-palette] :is(#nd-sidebar, #nd-sidebar-mobile) a[data-active='true'] { background: var(--color-fd-sidebar-selection); color: var(--color-fd-sidebar-selection-fg); font-weight: 600; }
+:root[data-palette] #nd-toc {
+  /* The table of contents belongs to the reading surface: no fill, no divider, just neutral text. */
+  --color-fd-primary: var(--color-fd-foreground);
+}
+:root[data-palette] #nd-toc a[data-active='true'] { font-weight: 600; }
+:root[data-palette] #nd-toc svg { --color-fd-primary: var(--color-fd-link); }
+:root[data-palette] .prose :where(a:not(.not-prose *)) { color: var(--color-fd-link); text-decoration-color: currentColor; text-underline-offset: .2em; }
+:root[data-palette] .prose :is(h1, h2, h3, h4, h5, h6) a { color: inherit; }
+:root[data-palette] #nd-page > nav { --color-fd-primary: var(--color-fd-foreground); }
+:root[data-palette] .shiki { background: var(--color-fd-code); color: var(--color-fd-code-fg); border-color: var(--color-fd-contrast-border); border-radius: .5rem; box-shadow: none; }
+/* Filled controls and raised menus already have a surface. Only HC themes ask for an extra outline. */
+:root[data-palette] :is(button, a).bg-fd-secondary,
+:root[data-palette] .docs-palette-menu,
+:root[data-palette] #nd-sidebar > div:last-child { border-color: var(--color-fd-contrast-border); }
+:root[data-palette] .prose :not(pre) > code { background: var(--color-fd-inline-code); color: var(--color-fd-inline-code-fg); }
+:root[data-palette] .docs-palette-menu {
+  background: var(--color-fd-popover);
+  --color-fd-accent: var(--color-fd-menu-hover);
+  --color-fd-accent-foreground: var(--color-fd-menu-hover-fg);
+  --color-fd-muted-foreground: var(--color-fd-menu-muted);
+  --color-fd-ring: var(--color-fd-menu-focus);
 }
 :root[data-palette='vitesse-light'] .shiki code span { color: var(--shiki-vitesse-light); font-style: var(--shiki-vitesse-light-font-style); }
 :root[data-palette='vitesse-dark'] .shiki code span { color: var(--shiki-vitesse-dark); font-style: var(--shiki-vitesse-dark-font-style); }

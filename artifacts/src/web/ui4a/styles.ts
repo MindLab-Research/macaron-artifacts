@@ -38,22 +38,18 @@ export function createSurfaceStyles(root: HTMLElement) {
       if (!partial) {
         emitted.clear();
         for (const values of sources.values()) for (const token of values) emitted.add(token);
-        const result = await uno.generate(emitted);
-        if (epoch === generation && sheet && preflights && properties) {
-          properties.textContent = result.getLayers(["properties"]);
-          preflights.textContent = result.getLayers(["theme"]);
-          sheet.textContent = result.getLayers(undefined, ["properties", "theme"]);
-        }
       } else {
         for (const token of fresh) emitted.add(token);
-        // Theme dependencies accumulate in Wind4, but @property registrations only
-        // describe this batch. Keep previous registrations alive until settlement.
-        const result = await uno.generate(fresh);
-        if (epoch === generation && sheet && preflights && properties) {
-          properties.textContent += result.getLayers(["properties"]);
-          preflights.textContent = result.getLayers(["theme"]);
-          sheet.textContent += result.getLayers(undefined, ["properties", "theme"]);
-        }
+      }
+      // UnoCSS caches token parsing. Reassemble all active rules so a late base
+      // utility cannot override an earlier responsive rule until streaming ends.
+      const result = await uno.generate(emitted);
+      if (epoch === generation && sheet && preflights && properties) {
+        const propertyCss = result.getLayers(["properties"]), themeCss = result.getLayers(["theme"]), utilityCss = result.getLayers(undefined, ["properties", "theme"]);
+        // Extracted prose and partial identifiers often add no CSS; avoid restyling the page for them.
+        if (properties.textContent !== propertyCss) properties.textContent = propertyCss;
+        if (preflights.textContent !== themeCss) preflights.textContent = themeCss;
+        if (sheet.textContent !== utilityCss) sheet.textContent = utilityCss;
       }
     }).catch((error) => console.error("[ui4a] style generation failed", error));
     return pending;

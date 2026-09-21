@@ -31,7 +31,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>()
       const element = viewport.current;
       if (!element) return;
       setStuckBoth(true);
-      element.scrollTo({ top: element.scrollHeight, behavior });
+      element.scrollTo({ top: element.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : behavior });
     },
     [setStuckBoth],
   );
@@ -40,7 +40,8 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>()
     const element = viewport.current;
     const box = content.current;
     if (!element || !box) return;
-    let lastTop = element.scrollTop;
+    const readTop = () => Math.min(Math.max(0, element.scrollHeight - element.clientHeight), Math.max(0, element.scrollTop));
+    let lastTop = readTop();
     let lastHeight = element.scrollHeight;
 
     /**
@@ -51,7 +52,7 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>()
      * 而内容增长只会让 scrollTop 不变、pin 只会让它变大，**只有用户才会让 scrollTop 变小**。
      */
     const onScroll = () => {
-      const top = element.scrollTop;
+      const top = readTop();
       const height = element.scrollHeight;
       const distance = height - top - element.clientHeight;
       // 内容变矮（折叠、消息被过滤掉）时浏览器会自己把 scrollTop 夹小，那不是用户在翻
@@ -66,9 +67,12 @@ export function useStickToBottom<V extends HTMLElement, C extends HTMLElement>()
 
     const observer = new ResizeObserver(() => {
       if (!stuckRef.current) return;
-      element.scrollTo({ top: element.scrollHeight });
+      const gap = Math.max(0, element.scrollHeight - element.clientHeight);
+      // Preserve native elastic offsets, just as the nested Reasoning viewport does.
+      if (element.scrollTop < 0 || element.scrollTop > gap) return;
+      if (gap - element.scrollTop > 1) element.scrollTo({ top: gap, behavior: 'instant' });
       // 同步更新基线：这次 pin 造成的 scrollTop 变化不该在下一次 onScroll 里被读成用户动作
-      lastTop = element.scrollTop;
+      lastTop = readTop();
       lastHeight = element.scrollHeight;
     });
     observer.observe(box);

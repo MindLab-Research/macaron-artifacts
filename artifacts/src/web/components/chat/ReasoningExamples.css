@@ -1,0 +1,19 @@
+.reasoning-examples { height: 100dvh; overflow: auto; background: var(--surface); color: var(--fg); }
+.reasoning-examples-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 24px; background: var(--surface-2); font-size: 12px; }
+.reasoning-examples-field { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); }
+.reasoning-examples-field select { appearance: auto; max-width: min(240px, 62vw); padding: 6px 8px; border: 0; border-radius: 4px; background: var(--surface); color: var(--fg); font: inherit; }
+.reasoning-examples-playback { display: flex; gap: 4px; }
+.reasoning-examples-playback button { min-width: 44px; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+.reasoning-examples-playback button:hover { background: var(--surface-3); }
+.reasoning-examples-progress { display: flex; align-items: center; flex: 1; min-width: 100px; max-width: 200px; }
+.reasoning-examples-progress input { width: 100%; accent-color: var(--accent); }
+.reasoning-examples :focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 3px; }
+.reasoning-examples-conversation { width: min(100% - 48px, 760px); margin: 64px auto; }
+.reasoning-examples-user { width: fit-content; max-width: 88%; margin-left: auto; margin-bottom: 36px; padding: 12px 16px; border-radius: 8px; background: var(--surface-2); font-size: 14px; line-height: 1.7; }
+.reasoning-examples-user p { margin: 0; }
+.reasoning-examples-assistant { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.reasoning-examples-tool { padding-block: 4px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.reasoning-examples-answer { margin: 0; font-size: 15px; line-height: 1.8; }
+.reasoning-examples-stopped { margin: 0; color: var(--muted); font-size: 12px; }
+.reasoning-examples-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (max-width: 600px) { .reasoning-examples-toolbar { padding: 12px 16px; gap: 10px 12px; } .reasoning-examples-conversation { width: calc(100% - 32px); margin-block: 36px; } .reasoning-examples-progress { max-width: none; } }
