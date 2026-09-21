@@ -34,9 +34,9 @@ body { margin: 0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-button.pressable.interactive { transition-duration: 160ms; transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
-button.pressable.interactive:active { transition-duration: 100ms; }
-button.pressable:focus-visible:active { scale: none; }
+button:is(.pressable.interactive, .btn-icon) { transition-duration: 160ms; transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+button:is(.pressable.interactive, .btn-icon):active { transition-duration: 100ms; }
+button:is(.pressable, .btn-icon):focus-visible:active { scale: none; }
 /* Headless UI reports the resolved placement, including a popup flipped above its trigger. */
 .select-popup { --popup-origin-x: 100%; --popup-origin-y: 0%; transform-origin: var(--popup-origin-x) var(--popup-origin-y); transition-property: opacity, scale; }
 .select-popup[data-anchor~='top'] { --popup-origin-y: 100%; }
@@ -249,6 +249,6 @@ button.pressable:focus-visible:active { scale: none; }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  button.pressable:active, .select-popup { scale: none !important; }
+  button:is(.pressable, .btn-icon):active, .select-popup { scale: none !important; }
   .select-popup { transition-property: opacity !important; transition-duration: 150ms !important; }
 }

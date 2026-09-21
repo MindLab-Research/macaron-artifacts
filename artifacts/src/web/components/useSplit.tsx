@@ -28,6 +28,7 @@ export function useSplit() {
   const [fraction, setFraction] = useState(DEFAULT_FRACTION);
   const [dragging, setDragging] = useState(false);
   const activePointer = useRef<number | null>(null);
+  const grabOffset = useRef(0);
 
   // 初值只能在这儿读：`useState` 的初始化跑在服务端，那里没有 localStorage。
   // lint 会建议「直接初始化 state」，照做就是 hydration 不匹配
@@ -60,6 +61,8 @@ export function useSplit() {
     // 指针捕获：拖到 iframe / canvas 内容上方时事件仍然回到分隔条，不会中途丢失
     event.currentTarget.setPointerCapture(event.pointerId);
     activePointer.current = event.pointerId;
+    // The hit area extends beyond the line; keep the edge where it was grabbed on the first move.
+    grabOffset.current = event.clientX - event.currentTarget.getBoundingClientRect().right;
     setDragging(true);
   }, []);
 
@@ -68,7 +71,7 @@ export function useSplit() {
       if (event.pointerId !== activePointer.current) return;
       const box = container.current?.getBoundingClientRect();
       if (!box) return;
-      setFraction(clampFraction((box.right - event.clientX) / box.width, box.width));
+      setFraction(clampFraction((box.right - event.clientX + grabOffset.current) / box.width, box.width));
     },
     [],
   );

@@ -21,7 +21,7 @@ export const unoConfig = (scope) => ({
   // Native roles may invert foreground and background. Crossfading both passes through unreadable intermediate colors.
   shortcuts: {
     interactive: 'transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]',
-    'btn-icon': 'interactive grid place-items-center text-muted hover:bg-surface-3 hover:text-hover-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+    'btn-icon': 'interactive grid place-items-center text-muted hover:bg-surface-3 hover:text-hover-fg active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
     'menu-item': 'interactive flex items-center gap-2 text-sm data-[focus]:bg-surface-3 data-[focus]:text-hover-fg',
     // Portal popovers must clear their owning dialog; confirmations stay above both.
     'z-content-overlay': 'z-10', 'z-sticky': 'z-20', 'z-floating-control': 'z-30', 'z-dialog': 'z-50', 'z-popover': 'z-60', 'z-confirm': 'z-70',
