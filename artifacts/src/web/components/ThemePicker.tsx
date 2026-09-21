@@ -5,6 +5,7 @@ import { matchingPreset, slotThemes, THEME_PRESETS, type ThemeMode, type ThemeSl
 import { loadTheme, THEME_OPTIONS, themeAppearance, themePalette, type ThemeId } from '../theme/themes';
 import { Icon } from './Icon';
 import { Select } from './Select';
+import { SelectionHighlight } from './SelectionHighlight';
 
 const MODES = [{ id: 'system', label: '自动', icon: 'monitor' }, { id: 'light', label: '浅色', icon: 'sun' }, { id: 'dark', label: '深色', icon: 'moon' }] as const;
 const themeLabel = (id: ThemeId) => THEME_OPTIONS.find(theme => theme.id === id)?.label ?? id;
@@ -79,7 +80,7 @@ export function AppearanceDialog({ onClose }: { onClose: () => void }) {
     <div className="mb-5 flex items-center justify-between"><DialogTitle className="text-base font-medium">外观</DialogTitle><button type="button" data-autofocus onClick={onClose} aria-label="关闭外观设置" className="btn-icon size-8 rounded-lg"><Icon name="x" /></button></div>
     <RadioGroup value={preferences.mode} onChange={(mode: ThemeMode) => setMode(mode)} aria-orientation="horizontal">
       <Label className="sr-only">显示模式</Label>
-      <div className="grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1">{MODES.map(mode => <Radio key={mode.id} as="button" type="button" value={mode.id} aria-label={mode.id === 'system' ? '自动，跟随系统' : mode.label} className="interactive flex h-10 items-center justify-center gap-2 rounded-md text-sm text-muted data-[checked]:bg-accent data-[checked]:font-medium data-[checked]:text-accent-fg data-[checked]:hover:bg-accent-hover [&:not([data-checked]):hover]:bg-surface-3 [&:not([data-checked]):hover]:text-hover-fg"><Icon name={mode.icon} />{mode.label}</Radio>)}</div>
+      <SelectionHighlight value={preferences.mode} className="grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1" highlightClassName="rounded-md bg-accent">{MODES.map(mode => <Radio key={mode.id} data-selection-value={mode.id} as="button" type="button" value={mode.id} aria-label={mode.id === 'system' ? '自动，跟随系统' : mode.label} className="interactive flex h-10 items-center justify-center gap-2 rounded-md text-sm text-muted data-[checked]:font-medium data-[checked]:text-accent-fg [&:not([data-checked]):hover]:bg-surface-3 [&:not([data-checked]):hover]:text-hover-fg"><Icon name={mode.icon} />{mode.label}</Radio>)}</SelectionHighlight>
     </RadioGroup>
     <div className="mt-5 flex items-center gap-4"><span className="shrink-0 text-xs font-medium text-muted">配色组合</span><div className="min-w-0 flex-1"><Select label="配色组合" value={preset?.id ?? 'custom'} options={[{ value: 'custom', label: '自定义', disabled: true }, ...THEME_PRESETS.map(item => ({ value: item.id, label: item.label }))]} onChange={id => { const choice = THEME_PRESETS.find(item => item.id === id); if (choice) pair(choice.light, choice.dark); }} /></div></div>
     <div className="mt-5 grid grid-cols-2 gap-4"><ThemePicker slot="light" /><ThemePicker slot="dark" /></div>

@@ -7,6 +7,7 @@ import { Icon } from '../Icon';
 import { HarnessIcon } from '../HarnessIcon';
 import { ProfileFields } from '../ProfileFields';
 import { useProfileOptions, useProfiles } from './ProfileProvider';
+import { SelectionHighlight } from '../SelectionHighlight';
 
 export function ProfileManager({ harnesses, initialHarness, cwd, onClose }: { harnesses: HarnessInfo[]; initialHarness?: HarnessId; cwd: string; onClose(): void }) {
   const { profiles, loading, error, refresh } = useProfiles();
@@ -27,7 +28,7 @@ export function ProfileManager({ harnesses, initialHarness, cwd, onClose }: { ha
     <Dialog open onClose={() => navigate(onClose)} className="relative z-dialog"><div className="fixed inset-0 bg-black/40" /><div className="fixed inset-0 flex items-center justify-center p-3 sm:p-6"><DialogPanel className="theme-widget flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl sm:max-h-[calc(100dvh-3rem)]">
       <header className="flex shrink-0 items-start justify-between gap-4 px-5 pt-5 sm:px-6"><div><DialogTitle className="text-base font-medium">Profiles</DialogTitle><p className="mt-1 text-xs leading-5 text-muted">保存不同模型与连接配置，在会话中快速切换。</p></div><button type="button" aria-label="关闭 Profiles" disabled={busy} onClick={() => navigate(onClose)} className="btn-icon size-8 shrink-0 rounded-lg"><Icon name="x" /></button></header>
       <TabGroup selectedIndex={Math.max(0, harnesses.findIndex(item => item.id === harness))} onChange={selectHarness} className="mt-4 flex min-h-0 flex-1 flex-col">
-        <TabList aria-label="Harness Profiles" className="mx-5 flex shrink-0 gap-1 overflow-x-auto rounded-lg bg-surface-2 p-1 sm:mx-6">{harnesses.map(item => <Tab key={item.id} disabled={busy} className="interactive flex min-w-20 flex-1 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-[11px] text-muted data-[selected]:bg-tab-active data-[selected]:text-tab-active-fg sm:text-sm"><HarnessIcon harness={item.id} /><span className="truncate">{item.name}</span></Tab>)}</TabList>
+        <TabList aria-label="Harness Profiles" className="mx-5 shrink-0 overflow-x-auto rounded-lg bg-surface-2 sm:mx-6"><SelectionHighlight value={harness} className="flex min-w-max gap-1 p-1" highlightClassName="rounded-md bg-tab-active">{harnesses.map(item => <Tab key={item.id} data-selection-value={item.id} disabled={busy} className="interactive flex min-w-20 flex-1 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-[11px] text-muted data-[selected]:text-tab-active-fg sm:text-sm"><HarnessIcon harness={item.id} /><span className="truncate">{item.name}</span></Tab>)}</SelectionHighlight></TabList>
         <TabPanels className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 sm:px-6 sm:pb-6">{harnesses.map(item => <TabPanel key={item.id} className="pt-4">
           {error ? <div role="alert" className="mb-4 text-sm text-danger">{error}<Button size="sm" variant="ghost" onClick={() => { void refresh(); }}>重试</Button></div> : null}
           {loading ? <p role="status" className="py-4 text-sm text-muted">正在读取 Profiles…</p> : null}{selection}

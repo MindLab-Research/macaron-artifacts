@@ -1,0 +1,11 @@
+.morph-height { min-width: 0; overflow: clip; }
+.morph-height[data-motion="true"] { transition: height 260ms cubic-bezier(.22,1,.36,1); }
+.approval-morph[data-motion="true"] { transition: background-color 260ms cubic-bezier(.22,1,.36,1); }
+.profile-disclosure { display: grid; grid-template-rows: 0fr; }
+.profile-disclosure[data-open="true"] { grid-template-rows: 1fr; }
+.profile-disclosure[data-motion="true"] { transition: grid-template-rows 240ms cubic-bezier(.22,1,.36,1); }
+.profile-disclosure > div { min-height: 0; overflow: hidden; }
+.profile-disclosure[data-open="true"] > div { overflow: clip; }
+@media (prefers-reduced-motion: reduce) {
+  .morph-height, .approval-morph, .profile-disclosure { transition: none !important; }
+}

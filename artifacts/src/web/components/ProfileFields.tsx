@@ -4,6 +4,7 @@ import type { HarnessId } from '../../shared/types';
 import type { ProfileConfig, ProfileInput, ProfileOptions } from '../../shared/profiles';
 import { Icon } from './Icon';
 import { Button, Field } from './ui4a-ui';
+import { MorphHeight } from './MorphHeight';
 
 type Option = { value: string; label: string; detail?: string };
 type ProfileFieldsProps = { harness: HarnessId; config: ProfileConfig; onChange(config: ProfileConfig): void; options: ProfileOptions; credentials: ProfileInput['credentials']; configured: { apiKey: boolean; authToken: boolean }; onCredentialsChange(next: ProfileInput['credentials']): void; disabled: boolean };
@@ -46,7 +47,8 @@ function Choice({ label, value, options, onChange, hint, disabled = false }: { l
 }
 
 function Advanced({ title, children }: { title: string; children: ReactNode }) {
-  return <Disclosure as="section" className="border-t border-contrast pt-3"><DisclosureButton className="interactive group flex w-full items-center justify-between gap-3 rounded-md py-1 text-left text-sm font-medium text-muted hover:bg-surface-3 hover:text-hover-fg"><span>{title}</span><Icon name="chevronDown" className="size-3.5 group-data-[open]:rotate-180" /></DisclosureButton><DisclosurePanel className="pt-4">{children}</DisclosurePanel></Disclosure>;
+  const [motion, setMotion] = useState(false);
+  return <Disclosure as="section" className="border-t border-contrast pt-3">{({ open }) => <><DisclosureButton onKeyDownCapture={() => setMotion(false)} onClickCapture={event => setMotion(event.detail > 0)} className="interactive group flex w-full items-center justify-between gap-3 rounded-md py-1 text-left text-sm font-medium text-muted hover:bg-surface-3 hover:text-hover-fg"><span>{title}</span><Icon name="chevronDown" className={`size-3.5 group-data-[open]:rotate-180 ${motion ? 'transition-transform duration-240 motion-reduce:transition-none' : ''}`} /></DisclosureButton><div className="profile-disclosure" data-open={open} data-motion={motion} inert={!open} aria-hidden={!open}><div><DisclosurePanel static className="pt-4">{children}</DisclosurePanel></div></div></>}</Disclosure>;
 }
 
 function FeatureFields({ config, options, onChange, disabled }: Pick<ProfileFieldsProps, 'config' | 'options' | 'onChange' | 'disabled'>) {
@@ -74,11 +76,14 @@ function AgentModels({ config, options, onChange, disabled, models }: Pick<Profi
 }
 
 function CredentialFields({ harness, config, onChange, credentials, configured, onCredentialsChange, disabled }: Omit<ProfileFieldsProps, 'options'>) {
+  const [motion, setMotion] = useState(false);
   const gatewayHarness = harness === 'hermes' || harness === 'openclaw', authMode = config.authMode ?? 'inherit', kind = authMode === 'auth-token' ? 'authToken' : 'apiKey';
   const label = kind === 'authToken' ? 'Bearer Token' : 'API Key', value = credentials?.[kind], saved = configured[kind] && value !== null;
   const clear = () => { onCredentialsChange({ ...credentials, [kind]: null }); onChange({ ...config, authMode: 'inherit' }); };
-  return <div className="grid gap-4 sm:grid-cols-2"><Choice label="认证方式" value={authMode} onChange={value => onChange({ ...config, authMode: value as ProfileConfig['authMode'] })} options={[{ value: 'inherit', label: '继承本机认证' }, ...(gatewayHarness ? [{ value: 'auth-token', label: 'Gateway Token' }] : [{ value: 'api-key', label: 'API Key' }, ...(harness === 'claude-code' ? [{ value: 'auth-token', label: 'Bearer Token' }] : [])])]} hint={gatewayHarness ? 'Gateway 凭据留在本机，不会发送到浏览器。' : '本机登录凭据和环境变量保持不变。'} disabled={disabled} />
+  return <div className="grid gap-4 sm:grid-cols-2" onPointerDownCapture={() => setMotion(true)} onKeyDownCapture={() => setMotion(false)}><Choice label="认证方式" value={authMode} onChange={value => onChange({ ...config, authMode: value as ProfileConfig['authMode'] })} options={[{ value: 'inherit', label: '继承本机认证' }, ...(gatewayHarness ? [{ value: 'auth-token', label: 'Gateway Token' }] : [{ value: 'api-key', label: 'API Key' }, ...(harness === 'claude-code' ? [{ value: 'auth-token', label: 'Bearer Token' }] : [])])]} hint={gatewayHarness ? 'Gateway 凭据留在本机，不会发送到浏览器。' : '本机登录凭据和环境变量保持不变。'} disabled={disabled} />
+    <div className="min-w-0 self-center"><MorphHeight change={authMode} animate={motion}>
     {authMode !== 'inherit' ? <HeadlessField disabled={disabled} className="min-w-0"><div className="mb-1.5 flex items-center justify-between gap-2"><Label className="text-xs font-medium text-muted">{label}</Label>{saved || value ? <button type="button" onClick={clear} disabled={disabled} className="interactive rounded-sm text-xs text-muted hover:text-danger disabled:opacity-50">移除凭据</button> : null}</div><Input type="password" autoComplete="new-password" spellCheck={false} value={value ?? ''} onChange={event => onCredentialsChange({ ...credentials, [kind]: event.target.value || (value === null ? null : undefined) })} placeholder={saved ? '已配置；留空保持不变' : `输入 ${label}`} className={control} /><Description className="mt-1.5 text-xs text-muted">仅发送新输入的值，不显示已保存的凭据。</Description></HeadlessField> : <p role="status" className="self-center text-xs text-muted">{credentials?.apiKey === null || credentials?.authToken === null ? '保存后移除所选凭据。' : '使用 Harness 已有的登录方式。'}</p>}
+    </MorphHeight></div>
   </div>;
 }
 
