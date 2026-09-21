@@ -32,7 +32,7 @@ function ReasoningView({ presentation, active, historyOpen }: { presentation: Re
   const { kind, entries } = presentation;
   const visible = kind === 'summary' && !historyOpen ? entries.slice(-1) : entries;
   const contentKey = `${historyOpen}:${visible.map(entry => `${entry.key}:${entry.text}`).join('\n')}`;
-  const { viewport, content, following, overflowing, resume } = useReasoningScroll(contentKey, active && !historyOpen);
+  const { viewport, content, following, overflowing, resume } = useReasoningScroll(contentKey, active && !historyOpen, historyOpen);
   const [arrivals] = useState(() => createSummaryArrivalTracker(entries));
   const arrival = useRef<Animation | null>(null);
   useLayoutEffect(() => {
@@ -68,7 +68,7 @@ function ReasoningView({ presentation, active, historyOpen }: { presentation: Re
         </div>
       </div>
       {(kind === 'summary' && entries.length > 1) || (overflowing && !following && active && !historyOpen) ? <div className="reasoning-actions">
-        {kind === 'summary' && entries.length > 1 ? <DisclosureButton data-export-reasoning-toggle data-reasoning-count={entries.length} aria-controls={regionId} className="reasoning-action" onClick={() => { if (historyOpen) resume(); }} title={historyOpen ? '仅显示最新摘要' : '查看先前摘要'}><Icon name="chevronDown" className="reasoning-action-icon" /><span>{historyOpen ? '仅显示最新' : `${entries.length} 段摘要`}</span></DisclosureButton> : null}
+        {kind === 'summary' && entries.length > 1 ? <DisclosureButton data-export-reasoning-toggle data-reasoning-count={entries.length} aria-controls={regionId} className="reasoning-action" onClick={event => { if (historyOpen) resume(event); }} title={historyOpen ? '仅显示最新摘要' : '查看先前摘要'}><Icon name="chevronDown" className="reasoning-action-icon" /><span>{historyOpen ? '仅显示最新' : `${entries.length} 段摘要`}</span></DisclosureButton> : null}
         {overflowing && !following && active && !historyOpen ? <button type="button" className="reasoning-action reasoning-resume" onClick={resume} title="继续跟随思考"><Icon name="arrowDown" className="reasoning-action-icon" /><span>跟随最新</span></button> : null}
       </div> : null}
     </div>

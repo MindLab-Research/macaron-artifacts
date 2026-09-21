@@ -1,13 +1,14 @@
-const STIFFNESS = 180;
-const DAMPING = 28;
+const RESPONSE = 8;
 
-/** Use elapsed time, with bounded substeps so high-refresh displays and delayed frames share the same spring. */
+/** Exact critically damped motion, with velocity bounded by remaining distance so a shortened target cannot overshoot. */
 export function stepTailSpring(position: number, velocity: number, target: number, elapsedMs: number) {
   const seconds = Math.min(64, Math.max(0, elapsedMs)) / 1000;
-  const steps = Math.max(1, Math.ceil(seconds * 120)), dt = seconds / steps;
-  for (let index = 0; index < steps; index++) {
-    velocity += (STIFFNESS * (target - position) - DAMPING * velocity) * dt;
-    position += velocity * dt;
-  }
-  return { position, velocity };
+  if (!seconds) return { position, velocity };
+  const distance = target - position, direction = Math.sign(distance);
+  if (!direction) return { position: target, velocity: 0 };
+  // Critical damping alone only prevents overshoot from rest. Streaming layout can shorten a target
+  // while the old velocity is still large; v <= response * distance preserves monotonic convergence.
+  velocity = direction * Math.min(Math.max(0, direction * velocity), RESPONSE * Math.abs(distance));
+  const coefficient = velocity - RESPONSE * distance, decay = Math.exp(-RESPONSE * seconds);
+  return { position: target + (-distance + coefficient * seconds) * decay, velocity: (velocity - RESPONSE * coefficient * seconds) * decay };
 }

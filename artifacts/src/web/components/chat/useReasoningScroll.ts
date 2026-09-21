@@ -1,86 +1,47 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { followReasoningScroll, reasoningScrollTop } from './reasoning-scroll';
+import { createScrollFollow } from '../code/scroll-follow';
 
 const EDGE_RAMP = 24;
 const BOTTOM_TOLERANCE = 2;
 
-export function useReasoningScroll(contentKey: string, live: boolean) {
+export function useReasoningScroll(contentKey: string, live: boolean, historyOpen = false) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const [overflowing, setOverflowing] = useState(false);
-  const followingRef = useRef(true);
   const liveRef = useRef(live);
-  const forcePin = useRef(false);
-  const schedule = useRef(() => {});
-
-  const resume = useCallback(() => {
-    followingRef.current = true;
-    forcePin.current = true;
-    schedule.current();
-  }, []);
+  const follower = useRef<ReturnType<typeof createScrollFollow> | null>(null);
+  const resume = useCallback((event?: { detail: number }) => follower.current?.resume(event?.detail === 0 ? 'instant' : 'smooth'), []);
 
   useEffect(() => {
-    const element = viewport.current;
-    const inner = content.current;
+    const element = viewport.current, inner = content.current;
     if (!element || !inner) return;
-    let frame = 0;
-    let lastTop = reasoningScrollTop(element);
-    let lastHeight = element.scrollHeight;
-    const measure = () => {
-      frame = 0;
-      const gap = followReasoningScroll(element, liveRef.current && followingRef.current, forcePin.current);
-      forcePin.current = false;
-      const top = reasoningScrollTop(element);
-      const bottom = Math.max(0, gap - top);
-      if (bottom <= BOTTOM_TOLERANCE) followingRef.current = true;
-      else if (!liveRef.current) followingRef.current = false;
-      lastTop = top;
-      lastHeight = element.scrollHeight;
-      element.style.setProperty('--reasoning-fade-top', String(Math.min(1, top / EDGE_RAMP)));
-      element.style.setProperty('--reasoning-fade-bottom', String(Math.min(1, bottom / EDGE_RAMP)));
-      setFollowing((previous) => previous === followingRef.current ? previous : followingRef.current);
-      setOverflowing((previous) => previous === (gap > BOTTOM_TOLERANCE) ? previous : gap > BOTTOM_TOLERANCE);
-    };
-    const requestMeasure = () => {
-      if (!frame) frame = requestAnimationFrame(measure);
-    };
-    schedule.current = requestMeasure;
-    const onScroll = () => {
-      // Elastic rebound is not an upward gesture; compare only positions inside the scrollable range.
-      const top = reasoningScrollTop(element);
-      const shrank = element.scrollHeight < lastHeight;
-      if (!shrank && top < lastTop - 0.5) followingRef.current = false;
-      if (element.scrollHeight - element.clientHeight - top <= BOTTOM_TOLERANCE) followingRef.current = true;
-      lastTop = top;
-      lastHeight = element.scrollHeight;
-      requestMeasure();
-    };
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) followingRef.current = false;
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home' || (event.key === ' ' && event.shiftKey)) followingRef.current = false;
-    };
-    const observer = new ResizeObserver(requestMeasure);
-    observer.observe(element);
-    observer.observe(inner);
-    element.addEventListener('scroll', onScroll, { passive: true });
-    element.addEventListener('wheel', onWheel, { passive: true });
-    element.addEventListener('keydown', onKeyDown);
-    requestMeasure();
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-      schedule.current = () => {};
-      element.removeEventListener('scroll', onScroll);
-      element.removeEventListener('wheel', onWheel);
-      element.removeEventListener('keydown', onKeyDown);
-    };
+    let lastFollowing = true, lastOverflowing = false;
+    const follow = createScrollFollow(element, {
+      following: liveRef.current, enabled: () => liveRef.current,
+      onChange: ({ top, gap, following }) => {
+        element.style.setProperty('--reasoning-fade-top', String(Math.min(1, top / EDGE_RAMP)));
+        element.style.setProperty('--reasoning-fade-bottom', String(Math.min(1, Math.max(0, gap - top) / EDGE_RAMP)));
+        if (lastFollowing !== following) { lastFollowing = following; setFollowing(following); }
+        if (lastOverflowing !== (gap > BOTTOM_TOLERANCE)) { lastOverflowing = gap > BOTTOM_TOLERANCE; setOverflowing(lastOverflowing); }
+      },
+    });
+    follower.current = follow;
+    follow.update(true);
+    const observer = new ResizeObserver(() => follow.update());
+    observer.observe(element); observer.observe(inner);
+    return () => { observer.disconnect(); follow.destroy(); follower.current = null; };
   }, []);
 
-  // Content/viewport resize handles new tokens; only the committed live state belongs in this effect.
-  useEffect(() => { liveRef.current = live; if (contentKey) schedule.current(); }, [contentKey, live]);
+  // Only committed streaming state reaches the controller; it owns transient positions outside React.
+  useEffect(() => {
+    const finished = liveRef.current && !live;
+    liveRef.current = live;
+    // Finish the last streamed movement; opening history is a distinct request to stop following.
+    if (historyOpen) follower.current?.pause();
+    else if (finished) follower.current?.finish();
+    else if (contentKey) follower.current?.update();
+  }, [contentKey, live, historyOpen]);
   return { viewport, content, following, overflowing, resume };
 }

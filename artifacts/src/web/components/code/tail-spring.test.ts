@@ -23,16 +23,15 @@ test('a background-frame delay stays bounded instead of destabilizing the spring
   expect(result.position).toBeLessThan(1000);
 });
 
-test('retargeting retains existing velocity instead of resetting motion', () => {
-  const result = stepTailSpring(40, 200, 20, 1000 / 120);
+test('a growing target retains velocity instead of restarting from rest', () => {
+  const result = stepTailSpring(40, 200, 1000, 1000 / 120);
   expect(result.position).toBeGreaterThan(40);
-  expect(result.velocity).toBeGreaterThan(0);
-  expect(result.velocity).toBeLessThan(200);
+  expect(result.velocity).toBeGreaterThan(200);
 });
 
 test('the existing damped spring settles without overshooting', () => {
   let state = { position: 0, velocity: 0 };
-  for (let frame = 0; frame < 360; frame++) {
+  for (let frame = 0; frame < 480; frame++) {
     const next = stepTailSpring(state.position, state.velocity, 1000, 1000 / 120);
     expect(next.position).toBeGreaterThanOrEqual(state.position);
     expect(next.position).toBeLessThanOrEqual(1000);
@@ -44,4 +43,24 @@ test('the existing damped spring settles without overshooting', () => {
 
 test('non-positive frame intervals cannot move the spring', () => {
   for (const elapsed of [0, -10]) expect(stepTailSpring(40, 200, 1000, elapsed)).toEqual({ position: 40, velocity: 200 });
+});
+
+test('starts by accelerating and settles by decelerating', () => {
+  const first = stepTailSpring(0, 0, 1000, 1000 / 60);
+  const second = stepTailSpring(first.position, first.velocity, 1000, 1000 / 60);
+  expect(second.position - first.position).toBeGreaterThan(first.position);
+  expect(simulate(60, 0.5).velocity).toBeLessThan(second.velocity);
+});
+
+test('shortened and reversed targets remain bounded even with inherited high velocity', () => {
+  for (const target of [413.394, 411.394, 412.394]) {
+    let state = { position: 412.394, velocity: 4520.906 };
+    for (let frame = 0; frame < 180; frame++) {
+      const next = stepTailSpring(state.position, state.velocity, target, 1000 / 60);
+      expect(next.position).toBeGreaterThanOrEqual(Math.min(state.position, target));
+      expect(next.position).toBeLessThanOrEqual(Math.max(state.position, target));
+      state = next;
+    }
+    expect(state.position).toBeCloseTo(target, 6);
+  }
 });
