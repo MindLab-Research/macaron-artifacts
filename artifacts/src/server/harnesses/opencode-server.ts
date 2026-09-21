@@ -22,6 +22,7 @@ export interface OpenCodeConnection {
   retry(id: string, messageID: string | undefined, text: string, signal: AbortSignal): Promise<void>;
   replyPermission(id: string, approved: boolean, signal: AbortSignal): Promise<void>;
   rejectQuestion(id: string, signal: AbortSignal): Promise<void>;
+  replyQuestion(id: string, answers: string[][], signal: AbortSignal): Promise<void>;
   abort(id: string, signal: AbortSignal): Promise<void>;
   deleteSession(id: string, signal: AbortSignal): Promise<void>;
   profileOptions(signal: AbortSignal): Promise<ProfileOptions>;
@@ -177,6 +178,7 @@ export async function startOpenCode(cwd: string, signal: AbortSignal, profile?: 
       async retry(sessionID, messageID, text, signal) { await client.v2.session.prompt({ sessionID, id: messageID, prompt: { text }, resume: true }, options(signal)); },
       async replyPermission(requestID, approved, signal) { await client.permission.reply({ requestID, reply: approved ? 'once' : 'reject' }, options(signal)); },
       async rejectQuestion(requestID, signal) { await client.question.reject({ requestID }, options(signal)); },
+      async replyQuestion(requestID, answers, signal) { await client.question.reply({ requestID, answers }, options(signal)); },
       async abort(sessionID, signal) { await client.session.abort({ sessionID }, options(signal)); },
       async deleteSession(sessionID, signal) { await client.session.delete({ sessionID }, options(signal)); },
       close,

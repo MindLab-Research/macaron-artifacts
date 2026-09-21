@@ -22,7 +22,7 @@ test('pi profiles isolate concurrent provider requests and preserve native crede
     await writeFile(join(agentDir, 'models.json'), models); await writeFile(join(agentDir, 'auth.json'), auth); await writeFile(join(agentDir, 'settings.json'), settings);
     const native = await import('@earendil-works/pi-coding-agent'), sdk = { ...native, getAgentDir: () => agentDir }, environment = { ...process.env };
     const profile = (id: string, effort = 'low') => ({ config: { model: 'local/main', effort, baseUrl: `http://127.0.0.1:${server.port}/${id}/v1` }, apiKey: `${id}-key` });
-    const turn = (id: string, extra: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: directory, prompt: id, instructions: 'Stable profile instructions', profile: profile(id), signal: AbortSignal.timeout(20_000), onNativeSession() {}, approve: async () => false, ...extra });
+    const turn = (id: string, extra: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: directory, prompt: id, instructions: 'Stable profile instructions', profile: profile(id), signal: AbortSignal.timeout(20_000), onNativeSession() {}, ask: async () => ({ cancelled: true as const }), approve: async () => false, ...extra });
     const run = async (value: HarnessTurn) => { for await (const _chunk of runPiSession(value, input => createPiSession(input, sdk))) { /* Drain deterministic local responses. */ } };
     let nativeId = '';
     await Promise.all([run(turn('one', { onNativeSession: id => { nativeId = id; } })), run(turn('two', { model: 'local/secondary', profile: profile('two', 'high') }))]);

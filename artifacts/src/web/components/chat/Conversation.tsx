@@ -1,11 +1,13 @@
 import { memo, useCallback, useSyncExternalStore } from 'react';
 import { useChat, type Chat } from '@ai-sdk/react';
 import type { ChatMessage, SessionSummary } from '../../../shared/types';
+import type { QuestionResponse } from '../../../shared/questions';
 import type { WorkspaceStore } from '../../chat/store';
 import { useStickToBottom } from './useStickToBottom';
 import { MessageBody } from './MessageBody';
 import { ToolCall } from './ToolCall';
 import { ApprovalCard } from './ApprovalCard';
+import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
 import { Reasoning } from './Reasoning';
 import { reasoningRunAt } from './reasoning-model';
@@ -20,18 +22,19 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const send = useCallback((text: string) => { store.send(session.id, text); scrollToBottom('instant'); }, [scrollToBottom, session.id, store]);
   const openArtifact = useCallback((path: string) => store.openArtifact(session.id, path), [session.id, store]);
   const approve = useCallback((id: string, approved: boolean) => store.approve(session.id, id, approved), [session.id, store]);
+  const answer = useCallback((id: string, response: QuestionResponse) => store.answer(session.id, id, response), [session.id, store]);
   const last = chat.messages.at(-1);
   const waiting = streaming && !(last?.role === 'assistant' && last.parts.some(part => {
     if (part.type === 'text') return Boolean(part.text.trim());
     // Active reasoning already owns a visible placeholder before its first text delta.
     if (part.type === 'reasoning') return part.state !== 'done' || Boolean(part.text.trim());
-    return part.type.startsWith('tool-') || part.type === 'dynamic-tool' || part.type === 'data-approval' || part.type === 'data-command' || (part.type === 'file' && part.mediaType.startsWith('image/'));
+    return part.type.startsWith('tool-') || part.type === 'dynamic-tool' || part.type === 'data-approval' || part.type === 'data-question' || part.type === 'data-command' || (part.type === 'file' && part.mediaType.startsWith('image/'));
   }));
   const suggestions = session.suggestions;
   const queued = store.queue(session.id);
   return <div className="@container relative flex h-full min-w-0 flex-1 flex-col">
     <div ref={viewport} data-chat-column className="min-h-0 flex-1 overflow-y-auto"><div ref={content} data-chat-content className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
-      {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} />)}
+      {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} active={session.status === 'running'} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} onAnswer={answer} />)}
       {waiting ? <LoadingState label={chat.status === 'submitted' ? '正在连接…' : '正在生成…'} /> : null}
       {chat.error || session.status === 'error' ? <div role="alert" className="flex items-center gap-3 rounded-xl border border-danger/40 px-3 py-2 text-xs text-danger"><span className="min-w-0 flex-1 break-words">{chat.error?.message ?? session.error ?? '这轮没有跑完'}</span><Button data-export-control size="sm" variant="ghost" onClick={() => void store.retry(session.id)}>重试</Button></div> : null}
     </div></div>
@@ -50,7 +53,7 @@ function SessionComposer({ store, sessionId, busy, onSend }: { store: WorkspaceS
   return <Composer text={text} setText={value => store.setDraft(sessionId, value)} disabled={false} busy={busy} onSend={onSend} onStop={() => void store.stop(sessionId).catch(store.fail)} />;
 }
 
-const Message = memo(function Message({ message, streaming, sessionId, cwd, onSend, onArtifact, onApprove }: { message: ChatMessage; streaming: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown> }) {
+const Message = memo(function Message({ message, streaming, active, sessionId, cwd, onSend, onArtifact, onApprove, onAnswer }: { message: ChatMessage; streaming: boolean; active: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown>; onAnswer: (id: string, response: QuestionResponse) => Promise<unknown> }) {
   // The server forwards one part per output delta; the joined text exists only here.
   const outputs = new Map<string, string>();
   const firstDelta = new Map<string, number>();
@@ -72,6 +75,7 @@ const Message = memo(function Message({ message, streaming, sessionId, cwd, onSe
       }
       if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') return <ToolCall key={index} cwd={cwd} part={part} commandOutput={'toolCallId' in part ? outputs.get(part.toolCallId) : undefined} onArtifact={onArtifact} />;
       if (part.type === 'data-approval') return <ApprovalCard key={part.data.id} approval={part.data} onDecide={approved => onApprove(part.data.id, approved)} />;
+      if (part.type === 'data-question') return <QuestionCard key={part.data.id} request={part.data} active={active} sessionId={sessionId} onAnswer={response => onAnswer(part.data.id, response)} />;
       // An orphan command stream renders once, at its first delta, carrying the joined output.
       if (part.type === 'data-command') return !toolIds.has(part.data.toolCallId) && firstDelta.get(part.data.toolCallId) === index ? <ToolCall key={index} part={{ type: 'tool-command', state: streaming ? 'input-available' : 'output-available', output: outputs.get(part.data.toolCallId) }} onArtifact={onArtifact} /> : null;
       if (part.type === 'file' && part.mediaType.startsWith('image/')) return <img key={index} src={part.url} alt={part.filename ?? ''} className="max-h-60 rounded-lg border border-contrast object-contain" />;

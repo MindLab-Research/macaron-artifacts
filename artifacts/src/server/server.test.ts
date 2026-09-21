@@ -7,6 +7,7 @@ import { ArtifactObserver, readUi4aFile, ui4aPath, writeUi4aFile } from './artif
 import { MetadataTasks, parseRecap } from './enrichment.js';
 import type { HarnessAdapter, HarnessTurn } from './harnesses/types.js';
 import type { ChatChunk, Session } from '../shared/types.js';
+import type { QuestionResponse } from '../shared/questions.js';
 import { SessionStore } from './store.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -159,6 +160,71 @@ test('approval round trip and explicit stop release a waiting harness', async ()
   expect((await post(`/api/sessions/${session.id}/approvals/approval-1`, { approved: true })).ok).toBe(true);
   expect(await response.text()).toContain('"delta":"true"');
 });
+test('question answers survive detach/replay, reject invalid or duplicate submissions, and resume the same turn', async () => {
+  const ready = deferred(); let answer: QuestionResponse | undefined;
+  const { app, post, base, session } = await setup(async function* (turn) {
+    const pending = turn.ask({ questions: [{ id: 'choice', question: 'Choose', options: [{ label: 'A' }, { label: 'B' }] }, { id: 'custom', question: 'Details', options: [], custom: true }] });
+    ready.resolve(); answer = await pending;
+    yield { type: 'text-start', id: 'result' }; yield { type: 'text-delta', id: 'result', delta: JSON.stringify(answer) }; yield { type: 'text-end', id: 'result' };
+  });
+  const response = await post('/api/chat', { id: session.id, messages: [message('ask', 'Ask me')] });
+  await ready.promise; await response.body?.cancel();
+  const run = app.active.get(session.id)!, id = [...run.questions.keys()][0], endpoint = `/api/sessions/${session.id}/questions/${id}`;
+  expect((await post(endpoint, { answers: { choice: ['invalid'], custom: ['notes'] } })).status).toBe(400);
+  expect(run.questions.size).toBe(1);
+  const replay = await fetch(`${base}/api/chat/${session.id}/stream`), expected = { answers: { choice: ['B'], custom: ['原生自定义回答'] } };
+  expect((await post(endpoint, expected)).ok).toBe(true);
+  expect((await post(endpoint, expected)).status).toBe(409);
+  expect(await replay.text()).toContain('原生自定义回答'); await run.done;
+  expect(answer).toEqual(expected); expect(run.questions.size).toBe(0);
+  const saved = await (await fetch(`${base}/api/sessions/${session.id}`)).json() as Session;
+  expect(saved.messages).toHaveLength(2);
+  expect(saved.messages[1].parts.filter(part => part.type === 'data-question')).toEqual([{ type: 'data-question', id, data: { ...run.journal.find(chunk => chunk.type === 'data-question')!.data, response: expected } }]);
+});
+
+test('cancel, stop, request abort and native failure all settle pending questions', async () => {
+  for (const mode of ['cancel', 'stop', 'request-abort', 'failure']) {
+    const ready = deferred(), fail = deferred(), controller = new AbortController(); let answer: QuestionResponse | undefined;
+    const { app, post, session } = await setup(async function* (turn) {
+      const pending = turn.ask({ questions: [{ id: 'q', question: 'Continue?', options: [], custom: true }] }, controller.signal);
+      void pending.then(value => { answer = value; }); ready.resolve();
+      if (mode === 'failure') { await fail.promise; throw new Error('Native connection lost'); }
+      await pending;
+    });
+    const response = await post('/api/chat', { id: session.id, messages: [message('ask', 'Ask me')] }); await ready.promise;
+    const run = app.active.get(session.id)!, id = [...run.questions.keys()][0];
+    if (mode === 'cancel') await post(`/api/sessions/${session.id}/questions/${id}`, { cancelled: true });
+    else if (mode === 'stop') await post(`/api/sessions/${session.id}/stop`, {});
+    else if (mode === 'request-abort') controller.abort();
+    else fail.resolve();
+    expect(await response.text()).toContain('"cancelled":true'); await run.done;
+    expect(answer).toEqual({ cancelled: true }); expect(run.questions.size).toBe(0);
+  }
+});
+
+test('secret answers reach the harness but are masked in the stream and saved question result', async () => {
+  const ready = deferred(); let answer: QuestionResponse | undefined;
+  const { app, post, session, cwd } = await setup(async function* (turn) {
+    const pending = turn.ask({ questions: [{ id: 'secret', question: 'Secret?', options: [], custom: true, secret: true }] });
+    ready.resolve(); answer = await pending;
+  });
+  const response = await post('/api/chat', { id: session.id, messages: [message('ask', 'Ask me')] }); await ready.promise;
+  const run = app.active.get(session.id)!, id = [...run.questions.keys()][0];
+  await post(`/api/sessions/${session.id}/questions/${id}`, { answers: { secret: ['private-answer'] } });
+  expect(await response.text()).not.toContain('private-answer'); await run.done;
+  expect(answer).toEqual({ answers: { secret: ['private-answer'] } });
+  expect(await readFile(join(cwd, 'sessions', `${session.id}.json`), 'utf8')).not.toContain('private-answer');
+});
+
+test('recovered questions are closed before retrying a crashed turn', async () => {
+  const cwd = await workspace(), store = new SessionStore(cwd);
+  const session: Session = { id: 'question-recovery', harness: 'codex', cwd, title: 'Recover', messages: [], suggestions: [], createdAt: 0, updatedAt: 0, status: 'running' };
+  await store.save(session);
+  await writeFile(store.journalPath(session.id), [{ type: 'start', messageId: 'partial' }, { type: 'data-question', id: 'pending', data: { id: 'pending', questions: [{ id: 'q', question: 'Choose', options: [], custom: true }] } }].map(chunk => JSON.stringify(chunk)).join('\n'));
+  const restarted = new SessionStore(cwd); await restarted.load();
+  expect(restarted.sessions.get(session.id)?.messages[0].parts[0]).toMatchObject({ type: 'data-question', data: { response: { cancelled: true } } });
+});
+
 test('blocks foreign origins and file traversal including outward symlinks', async () => {
   const { base, cwd } = await setup(async function* () {});
   expect((await fetch(base + '/api/sessions', { headers: { origin: 'https://example.com' } })).status).toBe(403);

@@ -8,7 +8,7 @@ import type { HarnessTurn } from './types.js';
 import { PiEventMapper } from './pi-events.js';
 import { createPiSession, piMetadataEntries, piPayloadPrefix, restorePiPayloadPrefix, runPiSession } from './pi.js';
 
-const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, approve: async () => true, ...overrides });
+const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, ask: async () => ({ cancelled: true as const }), approve: async () => true, ...overrides });
 const update = (type: string, fields: Record<string, unknown> = {}) => ({ type: 'message_update', assistantMessageEvent: { type, contentIndex: 0, ...fields } });
 
 describe('Pi event mapping', () => {

@@ -4,6 +4,7 @@ import { abortable, abortError, EventQueue, executableVersion, record, safeProfi
 import { CodexEventMapper } from './codex-events.js';
 import { CodexRpc, type CodexConnection } from './codex-rpc.js';
 import { codexProfileRuntime, initializeCodex, readCodexProfileOptions } from './codex-profiles.js';
+import { nativeQuestions } from './questions.js';
 
 export function codexThreadParams(turn: HarnessTurn): Record<string, unknown> {
   const config = codexProfileRuntime(turn.profile).config, model = turn.model || string(config.model);
@@ -20,7 +21,11 @@ export async function codexServerRequest(turn: HarnessTurn, method: string, valu
     return { decision: approved ? 'accept' : 'decline' };
   }
   if (method === 'item/tool/call') return { contentItems: [{ type: 'inputText', text: 'This client does not execute dynamic tools' }], success: false };
-  if (method === 'item/tool/requestUserInput') return { answers: {} };
+  if (method === 'item/tool/requestUserInput') {
+    if (turn.enrichment) return { answers: {} };
+    const response = await turn.ask({ questions: nativeQuestions(params.questions, 'codex') }, turn.signal);
+    return { answers: 'answers' in response ? Object.fromEntries(Object.entries(response.answers).map(([id, answers]) => [id, { answers }])) : {} };
+  }
   if (method === 'mcpServer/elicitation/request') return { action: 'decline', content: null, _meta: null };
   throw new Error(`Unsupported Codex request: ${method}`);
 }

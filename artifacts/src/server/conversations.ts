@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises';
 import { finished } from 'node:stream/promises';
 import { createUIMessageStream, readUIMessageStream } from 'ai';
 import type { Approval, ChatChunk, ChatMessage, Session } from '../shared/types.js';
+import { parseQuestionResponse, type QuestionRequest, type QuestionResponse } from '../shared/questions.js';
 import type { HarnessAdapter, ResolvedProfile } from './harnesses/types.js';
 import { safeProfileError } from './harnesses/common.js';
 import { ArtifactObserver } from './artifacts.js';
@@ -13,6 +14,7 @@ export class ActiveConversation {
   readonly controller = new AbortController();
   readonly journal: ChatChunk[] = [];
   readonly approvals = new Map<string, (approved: boolean) => void>();
+  readonly questions = new Map<string, { request: QuestionRequest; resolve: (response: QuestionResponse) => void }>();
   private listeners = new Set<ReadableStreamDefaultController<ChatChunk>>();
   private ended = false;
   private mainSettled = false;
@@ -39,6 +41,14 @@ export class ActiveConversation {
     for (const decide of this.approvals.values()) decide(false);
     this.approvals.clear();
   }
+  answerQuestion(id: string, value: unknown): 'missing' | 'invalid' | undefined {
+    const pending = this.questions.get(id);
+    if (!pending) return 'missing';
+    const response = parseQuestionResponse(pending.request, value);
+    if (!response) return 'invalid';
+    pending.resolve(response);
+  }
+  private cancelQuestions() { for (const pending of this.questions.values()) pending.resolve({ cancelled: true }); }
   private publish(chunk: ChatChunk) {
     this.journal.push(chunk);
     for (const listener of this.listeners) { try { listener.enqueue(chunk); } catch { this.listeners.delete(listener); } }
@@ -69,6 +79,25 @@ export class ActiveConversation {
           emit({ type: 'data-approval', id: request.id, data: { ...request, resolved: true } });
           return approved;
         };
+        const ask = (input: Omit<QuestionRequest, 'id'>, signal?: AbortSignal): Promise<QuestionResponse> => {
+          const activeSignal = signal ? AbortSignal.any([this.controller.signal, signal]) : this.controller.signal;
+          if (activeSignal.aborted || this.mainSettled) return Promise.resolve({ cancelled: true });
+          // Native request IDs can repeat on retry; a fresh ID prevents old cards from answering a new request.
+          const request: QuestionRequest = { ...input, id: crypto.randomUUID() };
+          emit({ type: 'data-question', id: request.id, data: request });
+          return new Promise(resolve => {
+            const decide = (response: QuestionResponse) => {
+              if (!this.questions.delete(request.id)) return;
+              activeSignal.removeEventListener('abort', abort);
+              const visible = 'answers' in response ? { answers: Object.fromEntries(request.questions.map(question => [question.id, question.secret ? ['••••••'] : response.answers[question.id]])) } : response;
+              emit({ type: 'data-question', id: request.id, data: { ...request, response: visible } });
+              resolve(response);
+            };
+            const abort = () => decide({ cancelled: true });
+            this.questions.set(request.id, { request, resolve: decide });
+            activeSignal.addEventListener('abort', abort, { once: true });
+          });
+        };
         const previousAssistant = this.retry ? session.messages.findLast(message => message.role === 'assistant') : undefined;
         writer.write({ type: 'start', messageId: previousAssistant?.id ?? crypto.randomUUID() });
         writer.write({ type: 'start-step' });
@@ -81,7 +110,7 @@ export class ActiveConversation {
             // turn must resume its native thread rather than silently starting another one.
             nativeCheckpoint = this.store.save(session);
             void nativeCheckpoint.catch(error => { failure = error; this.controller.abort(); });
-          }, approve };
+          }, approve, ask };
           for await (const chunk of this.adapter.run(turn)) {
             if (nativeCheckpoint) { await nativeCheckpoint; nativeCheckpoint = undefined; }
             artifacts.accept(chunk); emit(chunk);
@@ -92,10 +121,12 @@ export class ActiveConversation {
           if (diskError) throw diskError;
           if (this.controller.signal.aborted) throw new Error('This turn was stopped.');
           this.mainSettled = true;
+          this.cancelQuestions();
           writer.write({ type: 'finish-step' });
           writer.write({ type: 'finish', finishReason: 'stop' });
         } catch (error) {
           failure = error; this.mainSettled = true;
+          this.cancelQuestions();
           emit({ type: 'error', errorText: safeProfileError(error, this.profile) });
           writer.write({ type: 'finish', finishReason: 'error', messageMetadata: { interrupted: true } });
         } finally { await artifacts.close(); }

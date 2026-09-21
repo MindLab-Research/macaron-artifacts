@@ -7,7 +7,7 @@ const sizes = { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4 text-sm' };
 const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 
 export function Button({ variant = 'primary', size = 'md', className = '', type = 'button', ...props }: ComponentProps<'button'> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; size?: 'sm' | 'md' }) {
-  return <HeadlessButton type={type} className={`pressable interactive inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap active:scale-[0.98] data-[disabled]:pointer-events-none data-[disabled]:opacity-50 ${focus} ${variants[variant]} ${sizes[size]} ${className}`} {...props} />;
+  return <HeadlessButton type={type} className={`pressable interactive inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap active:scale-[0.98] data-[disabled]:pointer-events-none data-[disabled]:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:scale-100 ${focus} ${variants[variant]} ${sizes[size]} ${className}`} {...props} />;
 }
 
 export function Field({ label, hint, className = '', ...props }: ComponentProps<'input'> & { label: string; hint?: string }) {

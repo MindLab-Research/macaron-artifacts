@@ -1,5 +1,6 @@
 import type { Options, Query } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatChunk } from '../../shared/types.js';
+import { nativeQuestions } from './questions.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
 import { abortable, abortError, executableVersion, record, safeError, safeProfileError, string } from './common.js';
 import { claudeProfileOptions, prepareClaudeProfile, type PreparedClaudeProfile } from './claude-profile.js';
@@ -118,6 +119,10 @@ export function claudeOptions(turn: HarnessTurn, abortController: AbortControlle
     hooks: { PreToolUse: [{ hooks: [async () => turn.enrichment ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Metadata generation cannot execute tools' } } : {}] }] },
     canUseTool: async (tool, input, context) => {
       if (turn.enrichment) return { behavior: 'deny', message: 'Metadata generation cannot execute tools', interrupt: true };
+      if (tool === 'AskUserQuestion') {
+        const questions = nativeQuestions(input.questions, 'claude'), response = await turn.ask({ questions }, context.signal);
+        return 'answers' in response ? { behavior: 'allow', updatedInput: { ...input, answers: Object.fromEntries(questions.map(question => [question.question, response.answers[question.id].join(', ')])) } } : { behavior: 'deny', message: 'The user cancelled the questions', interrupt: false };
+      }
       const approved = await abortable(turn.approve({ id: context.requestId || context.toolUseID, tool, input }), context.signal);
       return approved ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: 'Denied by the user', interrupt: false };
     },

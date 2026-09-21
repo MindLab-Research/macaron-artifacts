@@ -97,7 +97,7 @@ AI SDK 7's experimental [HarnessAgent](https://ai-sdk.dev/docs/ai-sdk-harnesses/
 
 Metadata retains the same instructions, model and tool catalog, appending only its final metadata request. OpenCode's fork blocks execution through a tool hook; pi uses an in-memory native branch that retains session affinity and blocks tools at execution. It runs outside the main turn and is cancelled when a new turn arrives. This is prefix-friendly; cache hits still depend on the upstream provider. Usage parts preserve the native cached-input count. Metadata failure leaves the main response intact.
 
-OpenCode's native question dialogs and pi prompts that require a terminal UI are not supported in the WebUI. Tool execution approvals use the shared conversation controls.
+Native questions from Claude Code (`AskUserQuestion`), Codex (`requestUserInput`), OpenCode, and pi extension `select`/`input` dialogs appear as inline forms with choices, custom answers, and multi-question navigation. Answers return to the waiting native turn; cancelling declines the questionnaire. Pending forms and non-secret drafts survive browser refresh and conversation switching. Stopping a turn or restarting the server closes its pending forms. Tool execution approvals remain separate. Arbitrary pi terminal widgets and editors are not supported.
 
 ## UI4A contract
 

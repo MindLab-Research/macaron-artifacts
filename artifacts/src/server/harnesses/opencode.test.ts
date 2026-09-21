@@ -68,6 +68,7 @@ class FakeConnection implements OpenCodeConnection {
   async prompt(id: string, prompt: OpenCodePrompt) { this.calls.push({ method: 'prompt', value: { id, prompt } }); this.onPrompt(id); }
   async retry(id: string, messageID: string | undefined, text: string) { this.calls.push({ method: 'retry', value: { id, messageID, text } }); this.onPrompt(id); }
   async replyPermission(id: string, approved: boolean) { this.calls.push({ method: 'reply', value: { id, approved } }); this.emit('native', 'session.idle'); }
+  async replyQuestion(id: string, answers: string[][]) { this.calls.push({ method: 'question-reply', value: { id, answers } }); this.emit('native', 'session.idle'); }
   async rejectQuestion(id: string) { this.calls.push({ method: 'question-reject', value: id }); this.emit('native', 'session.idle'); }
   async abort(id: string) { this.calls.push({ method: 'abort', value: id }); this.queue.end(); }
   async deleteSession(id: string) { this.calls.push({ method: 'delete', value: id }); }
@@ -75,7 +76,7 @@ class FakeConnection implements OpenCodeConnection {
   async defaults() { this.calls.push({ method: 'defaults' }); return { model: 'native/default', agent: 'build' }; }
   async close() { this.calls.push({ method: 'close' }); this.queue.end(); }
 }
-const makeTurn = (extra: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'stable instructions', signal: new AbortController().signal, onNativeSession: () => {}, approve: async () => true, ...extra });
+const makeTurn = (extra: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'stable instructions', signal: new AbortController().signal, onNativeSession: () => {}, ask: async () => ({ cancelled: true as const }), approve: async () => true, ...extra });
 async function collect(turn: HarnessTurn, connection: OpenCodeConnection) { const chunks: ChatChunk[] = []; for await (const chunk of runOpenCodeConnection(turn, connection)) chunks.push(chunk); return chunks; }
 
 describe('OpenCode lifecycle', () => {
@@ -129,6 +130,35 @@ describe('OpenCode lifecycle', () => {
     await approval.promise; controller.abort();
     await expect(result).rejects.toMatchObject({ name: 'AbortError' });
     expect(connection.calls.slice(-2)).toEqual([{ method: 'abort', value: 'native' }, { method: 'close' }]);
+  });
+  test('questions return ordered multi-select/custom answers or native rejection', async () => {
+    for (const cancelled of [false, true]) {
+      const connection = new FakeConnection();
+      connection.onPrompt = id => connection.emit(id, 'question.asked', { id: 'question', questions: [{ question: 'Features?', options: [{ label: 'A' }, { label: 'B' }], multiple: true }, { question: 'Notes?', options: [] }] });
+      await collect(makeTurn({ ask: async request => {
+        expect(request.questions[0]).toMatchObject({ multiple: true, custom: true });
+        return cancelled ? { cancelled: true } : { answers: { '0': ['A', 'B'], '1': ['Free text'] } };
+      } }), connection);
+      expect(connection.calls.find(call => call.method.startsWith('question-'))).toEqual(cancelled ? { method: 'question-reject', value: 'question' } : { method: 'question-reply', value: { id: 'question', answers: [['A', 'B'], ['Free text']] } });
+    }
+  });
+  test('pending questions cannot block native errors, external rejection, or cancellation', async () => {
+    for (const mode of ['error', 'rejected', 'stop']) {
+      const connection = new FakeConnection(), controller = new AbortController(), asked = Promise.withResolvers<void>();
+      connection.onPrompt = id => connection.emit(id, 'question.asked', { id: 'question', questions: [{ question: 'Choose', options: [] }] });
+      let cancelled = false;
+      const result = collect(makeTurn({ signal: controller.signal, ask: (_request, signal) => new Promise(resolve => {
+        asked.resolve(); signal!.addEventListener('abort', () => { cancelled = true; resolve({ cancelled: true }); }, { once: true });
+      }) }), connection);
+      await asked.promise;
+      if (mode === 'error') connection.emit('native', 'session.error', { error: { data: { message: 'Native failure' } } });
+      else if (mode === 'stop') controller.abort();
+      else { connection.emit('native', 'question.rejected', { requestID: 'question' }); connection.emit('native', 'session.idle'); }
+      if (mode === 'rejected') await result;
+      else await expect(result).rejects.toThrow(mode === 'error' ? 'Native failure' : 'interrupted');
+      expect(cancelled).toBe(true); expect(connection.calls.some(call => call.method.startsWith('question-'))).toBe(false);
+      expect(connection.calls.at(-1)?.method).toBe('close');
+    }
   });
   test('native errors and event disconnection abort the running session and close transport', async () => {
     for (const mode of ['error', 'disconnect']) {

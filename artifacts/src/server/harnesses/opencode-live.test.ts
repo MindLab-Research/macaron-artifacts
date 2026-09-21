@@ -30,7 +30,7 @@ test.skipIf(!process.env.MACARON_OPENCODE_SMOKE_PATH)('OpenCode native streaming
     let nativeId = '';
     const run = async (prompt: string, enrichment = false) => {
       const chunks: ChatChunk[] = [];
-      for await (const chunk of openCodeAdapter.run({ cwd: directory, nativeId: nativeId || undefined, model: 'local/fake', prompt, enrichment, instructions: 'Stable system instructions', signal: AbortSignal.timeout(30000), onNativeSession: id => { nativeId = id; }, approve: async () => true })) chunks.push(chunk);
+      for await (const chunk of openCodeAdapter.run({ cwd: directory, nativeId: nativeId || undefined, model: 'local/fake', prompt, enrichment, instructions: 'Stable system instructions', signal: AbortSignal.timeout(30000), onNativeSession: id => { nativeId = id; }, ask: async () => ({ cancelled: true as const }), approve: async () => true })) chunks.push(chunk);
       return chunks;
     };
     const main = await run('main'), originalID = nativeId;

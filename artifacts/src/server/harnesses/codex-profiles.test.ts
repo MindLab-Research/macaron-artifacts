@@ -126,7 +126,7 @@ test('Codex applies effort on every turn and redacts arbitrary configured creden
     if (method === 'turn/start') { sent = params; queueMicrotask(() => rpc.notification?.('turn/completed', { threadId: 'native', turn: { status: 'failed', error: { message: 'provider rejected secret-value' } } })); return { turn: { id: 'turn' } }; }
     return {};
   });
-  const turn: HarnessTurn = { cwd: '/workspace', prompt: 'hello', instructions: 'stable', signal: new AbortController().signal, onNativeSession() {}, async approve() { return false; }, profile: { config: { effort: 'ultra' }, apiKey: 'secret-value' } };
+  const turn: HarnessTurn = { cwd: '/workspace', prompt: 'hello', instructions: 'stable', signal: new AbortController().signal, onNativeSession() {}, ask: async () => ({ cancelled: true }), async approve() { return false; }, profile: { config: { effort: 'ultra' }, apiKey: 'secret-value' } };
   await expect(async () => { for await (const _ of runCodexConnection(turn, rpc)) {} }).toThrow('provider rejected [redacted]');
   expect(sent?.effort).toBe('ultra'); expect(rpc.closed).toBe(true);
 });
@@ -150,7 +150,7 @@ test('explicit native inheritance captures configured routing and catalog defaul
       if (method === 'turn/start') { queueMicrotask(() => rpc.notification?.('turn/completed', { threadId: id, turn: { status: 'completed' } })); return { turn: { id: 'turn' } }; }
       return {};
     });
-    const turn: HarnessTurn = { cwd: '/workspace', nativeId: 'old-profile-thread', profile, prompt: 'hello', instructions: 'stable', enrichment, signal: new AbortController().signal, onNativeSession() {}, approve: async () => false };
+    const turn: HarnessTurn = { cwd: '/workspace', nativeId: 'old-profile-thread', profile, prompt: 'hello', instructions: 'stable', enrichment, signal: new AbortController().signal, onNativeSession() {}, ask: async () => ({ cancelled: true as const }), approve: async () => false };
     for await (const _ of runCodexConnection(turn, rpc)) {}
   }
   const resumed = captured.find(call => call.method === 'thread/resume')!.params, forked = captured.find(call => call.method === 'thread/fork')!.params;

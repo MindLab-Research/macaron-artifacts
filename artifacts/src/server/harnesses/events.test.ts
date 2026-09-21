@@ -7,7 +7,7 @@ import { CodexEventMapper } from './codex-events.js';
 import { codexServerRequest, codexThreadParams, runCodexConnection } from './codex.js';
 import type { CodexConnection } from './codex-rpc.js';
 
-const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, approve: async () => true, ...overrides });
+const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, ask: async () => ({ cancelled: true as const }), approve: async () => true, ...overrides });
 const partial = (event: unknown, parent_tool_use_id: string | null = null) => ({ type: 'stream_event', session_id: 'native-main', parent_tool_use_id, event });
 
 describe('Claude native deltas', () => {

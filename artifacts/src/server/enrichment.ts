@@ -34,7 +34,7 @@ export class MetadataTasks {
       const startedAt = Date.now();
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]);
       try {
-        for await (const chunk of adapter.run({ nativeId, cwd: session.cwd, prompt: ENRICHMENT_PROMPT, model, profile, instructions, enrichment: true, signal, onNativeSession: () => {}, approve: async () => false })) {
+        for await (const chunk of adapter.run({ nativeId, cwd: session.cwd, prompt: ENRICHMENT_PROMPT, model, profile, instructions, enrichment: true, signal, onNativeSession: () => {}, approve: async () => false, ask: async () => ({ cancelled: true }) })) {
           if (signal.aborted || this.tasks.get(session.id) !== task) break;
           if (chunk.type !== 'text-delta') continue;
           text += chunk.delta;

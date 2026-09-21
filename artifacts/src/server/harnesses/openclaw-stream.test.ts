@@ -33,7 +33,7 @@ async function replay(events: Event[], overrides: Partial<HarnessTurn> = {}) {
     },
   } });
   try {
-    for await (const chunk of openClawAdapter.run({ cwd: '/tmp', prompt: 'Show the report', instructions: 'UI4A guidance', signal: AbortSignal.timeout(5000), approve: async () => false, onNativeSession() {}, profile: { config: { gatewayUrl: `ws://127.0.0.1:${server.port}` } }, ...overrides })) chunks.push(chunk);
+    for await (const chunk of openClawAdapter.run({ cwd: '/tmp', prompt: 'Show the report', instructions: 'UI4A guidance', signal: AbortSignal.timeout(5000), ask: async () => ({ cancelled: true as const }), approve: async () => false, onNativeSession() {}, profile: { config: { gatewayUrl: `ws://127.0.0.1:${server.port}` } }, ...overrides })) chunks.push(chunk);
   } catch (cause) { error = cause; }
   finally { server.stop(true); }
   return { chunks, requests, connection, archived, error };

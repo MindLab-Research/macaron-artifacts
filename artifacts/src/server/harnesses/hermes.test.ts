@@ -56,7 +56,7 @@ describe('Hermes gateway adapter protocol helpers', () => {
     process.env.MACARON_HERMES_URL = 'ws://hermes.test';
     try {
       const { hermesAdapter } = await import('./hermes.js');
-      const base = { cwd: '/tmp', instructions: '', signal: new AbortController().signal, approve: async () => true, onNativeSession: (_id: string) => {} };
+      const base = { cwd: '/tmp', instructions: '', signal: new AbortController().signal, ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: (_id: string) => {} };
       let nativeId: string | undefined;
       const run = async (prompt: string) => { const chunks = []; for await (const chunk of hermesAdapter.run({ ...base, prompt, nativeId, onNativeSession: id => { nativeId = id; } })) chunks.push(chunk); return chunks; };
       const first = await run('first'), resumed = await run('second');

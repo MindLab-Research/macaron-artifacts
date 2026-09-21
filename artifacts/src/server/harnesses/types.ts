@@ -1,5 +1,6 @@
 import type { Approval, ChatChunk, HarnessId, HarnessInfo } from '../../shared/types.js';
 import type { ProfileConfig, ProfileOptions } from '../../shared/profiles.js';
+import type { QuestionRequest, QuestionResponse } from '../../shared/questions.js';
 
 /** Server-only, captured once per turn and reused by its metadata fork. Never serialize this in a Session. */
 export interface ResolvedProfile {
@@ -25,6 +26,7 @@ export interface HarnessTurn {
   enrichment?: boolean;
   onNativeSession: (id: string) => void;
   approve: (request: Approval) => Promise<boolean>;
+  ask: (request: Omit<QuestionRequest, 'id'>, signal?: AbortSignal) => Promise<QuestionResponse>;
 }
 export interface HarnessAdapter {
   id: HarnessId;

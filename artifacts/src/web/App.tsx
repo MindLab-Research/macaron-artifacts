@@ -5,6 +5,7 @@ import { useTheme } from './theme/ThemeProvider';
 import { Conversation } from './components/chat/Conversation';
 import { Sidebar, SidebarDrawer } from './components/Sidebar';
 import { NewSessionDialog } from './components/NewSessionDialog';
+import { DeleteSessionDialog } from './components/DeleteSessionDialog';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { Icon } from './components/Icon';
 import { Select } from './components/Select';
@@ -25,6 +26,7 @@ export default function App() {
   const { profiles } = useProfiles();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [newSession, setNewSession] = useState<{ harness?: HarnessId } | null>(null);
+  const [deletingId, setDeletingId] = useState<string>();
   const [emptyCanvasOpen, setEmptyCanvasOpen] = useState(false);
   const split = useSplit();
   const chatTarget = useRef<HTMLDivElement>(null);
@@ -32,6 +34,7 @@ export default function App() {
   const session = actions.active();
   const chat = session ? actions.chat(session.id) : undefined;
   const settingsSession = state.sessions.find(item => item.id === sessionSettings);
+  const deletingSession = state.sessions.find(item => item.id === deletingId);
   const activeProfile = profiles.find(profile => profile.id === session?.profileId);
   const selectedArtifact = session ? actions.selectedArtifact(session.id) : undefined;
   const artifacts = session ? actions.artifacts(session.id) : [];
@@ -44,7 +47,16 @@ export default function App() {
     if ('requestIdleCallback' in window) { const handle = requestIdleCallback(warm); return () => cancelIdleCallback(handle); }
     const timer = setTimeout(warm, 0); return () => clearTimeout(timer);
   }, []);
-  const sidebar = { sessions: state.sessions, activeId: state.activeId, cwd: session?.cwd ?? actions.defaultCwd(), onSelect: (id: string) => { void actions.select(id); }, onCreate: create, onDelete: (id: string) => { void actions.remove(id).catch(actions.fail); }, onAppearance: () => setAppearanceOpen(true), onProfiles: () => setProfilesOpen(true) };
+  const sidebar = { sessions: state.sessions, activeId: state.activeId, cwd: session?.cwd ?? actions.defaultCwd(), onSelect: (id: string) => { void actions.select(id); }, onCreate: create, onDelete: setDeletingId, onAppearance: () => setAppearanceOpen(true), onProfiles: () => setProfilesOpen(true) };
+  const deleteSession = async (id: string) => {
+    await actions.remove(id);
+    // The dialog's return target was deleted. Focus the remaining selection after its focus-restoration cleanup.
+    requestAnimationFrame(() => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-session-id], [data-new-session]')].filter(button => button.getClientRects().length);
+      (buttons.find(button => button.dataset.sessionId === actions.active()?.id) ?? buttons.find(button => button.hasAttribute('data-new-session')))?.focus();
+    });
+  };
   const closeCanvas = () => { if (session) actions.closeArtifact(session.id); setEmptyCanvasOpen(false); };
   const toggleCanvas = () => { if (canvasOpen) closeCanvas(); else if (session && artifacts.length) actions.openArtifact(session.id, artifacts[0].path); else setEmptyCanvasOpen(true); };
 
@@ -66,6 +78,7 @@ export default function App() {
       </div>
     </div>
     {newSession ? <NewSessionDialog key={newSession.harness ?? 'default'} harnesses={state.harnesses} initialHarness={newSession.harness} initialCwd={actions.defaultCwd()} onClose={() => setNewSession(null)} onCreate={actions.create} /> : null}
+    {deletingSession ? <DeleteSessionDialog key={deletingSession.id} session={deletingSession} onClose={() => setDeletingId(undefined)} onDelete={() => deleteSession(deletingSession.id)} /> : null}
     {appearanceOpen ? <AppearanceDialog onClose={() => setAppearanceOpen(false)} /> : null}
     {settingsSession ? <SessionProfileDialog key={settingsSession.id} session={settingsSession} running={settingsSession.status === 'running'} onClose={() => setSessionSettings(undefined)} onManage={() => setProfilesOpen(true)} onSave={input => actions.configure(settingsSession.id, input)} /> : null}
     {profilesOpen ? <ProfileManager harnesses={state.harnesses} initialHarness={settingsSession?.harness ?? session?.harness} cwd={settingsSession?.cwd ?? session?.cwd ?? actions.defaultCwd()} onClose={() => setProfilesOpen(false)} /> : null}

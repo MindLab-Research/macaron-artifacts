@@ -186,6 +186,12 @@ export async function createArtifactsServer(options: { directory: string; instru
           if (!decide) return json(res, { error: 'Approval is no longer pending.' }, 409);
           decide(input.approved === true); return json(res, { ok: true });
         }
+        if (segments[3] === 'questions' && req.method === 'POST') {
+          const input = await body(req), run = active.get(session.id), result = run ? run.answerQuestion(decodeURIComponent(segments[4] ?? ''), input) : 'missing';
+          if (result === 'missing') return json(res, { error: 'Question is no longer pending.' }, 409);
+          if (result === 'invalid') return json(res, { error: 'Answer every question using its allowed choices or a custom answer.' }, 400);
+          return json(res, { ok: true });
+        }
         if (segments[3] === 'artifacts' && req.method === 'GET') return json(res, await listArtifacts(session.cwd));
         if (segments[3] === 'files') {
           const path = url.searchParams.get('path') ?? '';

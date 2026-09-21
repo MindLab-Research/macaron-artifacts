@@ -1,5 +1,6 @@
 Beautiful UI — https://github.com/slev12397/beautiful-ui
 LoadingState Drive animation adapted from commit c99a3586cf4fc093091feb47d3c066da1fb2e342.
+QuestionCard visuals adapted from ApprovalCard at the same commit.
 
 MIT License
 

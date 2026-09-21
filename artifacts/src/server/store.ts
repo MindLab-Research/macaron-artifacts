@@ -34,6 +34,8 @@ export class SessionStore {
         }
       }
       session.status = interrupted ? 'error' : 'idle';
+      // A recovered transcript cannot reconnect the native process that owned these callbacks.
+      for (const message of session.messages) for (const part of message.parts) if (part.type === 'data-question' && !part.data.response) part.data.response = { cancelled: true };
       session.error = interrupted ? 'The server stopped during this turn. The partial response was recovered.' : undefined;
       await this.save(session);
       await rm(this.journalPath(session.id), { force: true });

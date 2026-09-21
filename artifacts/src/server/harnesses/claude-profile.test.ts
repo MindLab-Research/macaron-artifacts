@@ -9,7 +9,7 @@ import { claudeOptions, runClaudeTurn } from './claude.js';
 import { abortable } from './common.js';
 import type { HarnessTurn, ResolvedProfile } from './types.js';
 
-const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, approve: async () => true, ...overrides });
+const turn = (overrides: Partial<HarnessTurn> = {}): HarnessTurn => ({ cwd: '/tmp', prompt: 'hello', instructions: 'Stable UI4A guidance', signal: new AbortController().signal, onNativeSession() {}, ask: async () => ({ cancelled: true as const }), approve: async () => true, ...overrides });
 const profile: ResolvedProfile = { config: { model: 'primary', subagentModel: 'worker', effort: 'auto', baseUrl: 'https://example.test', authMode: 'api-key' }, apiKey: 'test-profile-secret' };
 const result = { type: 'result', is_error: false, result: 'done' };
 const assistant = { type: 'assistant', message: { id: 'a1', content: [{ type: 'text', text: 'hello' }] } };

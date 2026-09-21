@@ -1,14 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentSession, CreateAgentSessionOptions, FileEntry, SessionHeader, SessionManager } from '@earendil-works/pi-coding-agent';
+import type { AgentSession, CreateAgentSessionOptions, ExtensionUIDialogOptions, ExtensionUIContext, FileEntry, SessionHeader, SessionManager } from '@earendil-works/pi-coding-agent';
 import type { ChatChunk } from '../../shared/types.js';
+import type { Question } from '../../shared/questions.js';
 import type { ProfileOptions } from '../../shared/profiles.js';
 import type { HarnessAdapter, HarnessTurn, ResolvedProfile } from './types.js';
 import { abortable, abortError, EventQueue, record, safeError } from './common.js';
 import { PiEventMapper } from './pi-events.js';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
+export function piQuestionUI(turn: HarnessTurn): Pick<ExtensionUIContext, 'select' | 'input'> {
+  const ask = async (question: Question, options?: ExtensionUIDialogOptions) => {
+    if (turn.enrichment) return undefined;
+    const controller = new AbortController(), signal = AbortSignal.any([turn.signal, controller.signal, ...(options?.signal ? [options.signal] : [])]);
+    const timer = options?.timeout === undefined ? undefined : setTimeout(() => controller.abort(), Math.max(0, options.timeout));
+    try { const response = await turn.ask({ questions: [question] }, signal); return 'answers' in response ? response.answers[question.id][0] : undefined; }
+    finally { clearTimeout(timer); }
+  };
+  return {
+    select: (title, options, opts) => ask({ id: 'answer', question: title, options: options.map(label => ({ label })), custom: false }, opts),
+    input: (title, placeholder, opts) => ask({ id: 'answer', question: title, options: [], custom: true, placeholder }, opts),
+  };
+}
 type RequestContext = Parameters<AgentSession['agent']['streamFunction']>[1];
 type PayloadPrefix = { api: string; history: string; fields: Record<string, unknown>; instructions: unknown[] };
 type Bootstrap = { version: 2; instructions: string; systemPrompt: string; tools: NonNullable<RequestContext['tools']>; payload?: PayloadPrefix };
@@ -144,10 +158,9 @@ export async function createPiSession(turn: HarnessTurn, suppliedSdk?: PiSdk) {
     }
     const current = session;
     installPiApprovalGate(current, turn);
-    // Confirmation requests from native extensions can use the shared approval UI;
-    // richer terminal dialogs keep the SDK's cancellation defaults.
+    // Native extension dialogs share the conversation; arbitrary terminal widgets still use SDK defaults.
     const ui = current.extensionRunner.getUIContext();
-    await current.bindExtensions({ mode: 'print', uiContext: { ...ui, confirm: async (title, message, options) => turn.enrichment ? false : abortable(turn.approve({ id: randomUUID(), tool: title, input: { message } }), options?.signal ? AbortSignal.any([turn.signal, options.signal]) : turn.signal) }, abortHandler: () => { void current.abort(); } });
+    await current.bindExtensions({ mode: 'print', uiContext: { ...ui, ...piQuestionUI(turn), confirm: async (title, message, options) => turn.enrichment ? false : abortable(turn.approve({ id: randomUUID(), tool: title, input: { message } }), options?.signal ? AbortSignal.any([turn.signal, options.signal]) : turn.signal) }, abortHandler: () => { void current.abort(); } });
     if (turn.signal.aborted) throw abortError();
     if (affinity) {
       current.agent.sessionId = affinity;

@@ -26,7 +26,7 @@ test.skipIf(!process.env.MACARON_OPENCODE_SMOKE_PATH)('native OpenCode profiles 
     const profile: ResolvedProfile = { config: { model: 'local/worker', variant: 'high', baseUrl: `http://127.0.0.1:${server.port}/profile/v1` }, apiKey: 'profile-key' };
     let nativeId = '';
     const run = async (prompt: string, profile: ResolvedProfile, enrichment = false) => {
-      for await (const _chunk of openCodeAdapter.run({ cwd: directory, nativeId: nativeId || undefined, profile, prompt, enrichment, instructions: 'Stable profile guidance', signal: AbortSignal.timeout(30_000), onNativeSession: id => { nativeId = id; }, approve: async () => false })) { /* Drain only the local scripted provider. */ }
+      for await (const _chunk of openCodeAdapter.run({ cwd: directory, nativeId: nativeId || undefined, profile, prompt, enrichment, instructions: 'Stable profile guidance', signal: AbortSignal.timeout(30_000), onNativeSession: id => { nativeId = id; }, ask: async () => ({ cancelled: true as const }), approve: async () => false })) { /* Drain only the local scripted provider. */ }
       return calls.at(-1)!;
     };
     const main = await run('profile main', profile), parent = nativeId;

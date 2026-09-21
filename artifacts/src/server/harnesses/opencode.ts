@@ -3,6 +3,7 @@ import type { HarnessAdapter, HarnessTurn } from './types.js';
 import { abortable, abortError, EventQueue, executableVersion, record, safeError, string } from './common.js';
 import { OpenCodeEventMapper } from './opencode-events.js';
 import { startOpenCode, type OpenCodeConnection, type OpenCodePrompt } from './opencode-server.js';
+import { nativeQuestions } from './questions.js';
 
 export function openCodeModel(model: string): { providerID: string; modelID: string } {
   const slash = model.indexOf('/');
@@ -15,6 +16,7 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
   const signal = AbortSignal.any([turn.signal, controller.signal]);
   let nativeID = '', started = false, terminal = false, active = false, resolveReady!: () => void, resolveDone!: () => void, rejectDone!: (error: unknown) => void;
   const assistantIDs = new Set<string>();
+  const questions = new Map<string, AbortController>(), replies = new Set<Promise<void>>();
   let overflow: { error: Error; precedingIDs: Set<string> } | undefined;
   let pump: Promise<void> | undefined;
   const ready = new Promise<void>(resolve => { resolveReady = resolve; });
@@ -49,8 +51,24 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
           const approved = !turn.enrichment && await abortable(turn.approve({ id: string(properties.id), tool: string(properties.permission), input: properties }), signal);
           await connection.replyPermission(string(properties.id), approved, signal);
         } else if (event.type === 'question.asked') {
-          // The shared approval surface cannot answer free-form native questionnaires.
-          await connection.rejectQuestion(string(properties.id), signal);
+          active = true;
+          const id = string(properties.id);
+          if (!questions.has(id)) {
+            const pending = new AbortController(); questions.set(id, pending);
+            // Keep pumping native errors, external answers and completion while the browser is answering.
+            const reply = (async () => {
+              const items = nativeQuestions(properties.questions, 'opencode');
+              const response = turn.enrichment ? { cancelled: true } as const : await turn.ask({ questions: items }, AbortSignal.any([signal, pending.signal]));
+              if (signal.aborted || pending.signal.aborted) return;
+              questions.delete(id);
+              if ('answers' in response) await connection.replyQuestion(id, items.map(question => response.answers[question.id]), signal);
+              else await connection.rejectQuestion(id, signal);
+            })();
+            replies.add(reply);
+            void reply.catch(error => { if (!signal.aborted && !terminal) fail(error); }).finally(() => { replies.delete(reply); if (questions.get(id) === pending) questions.delete(id); });
+          }
+        } else if (event.type === 'question.replied' || event.type === 'question.rejected') {
+          questions.get(string(properties.requestID))?.abort();
         }
         const nativeError = event.type === 'session.error' ? properties.error : assistant ? info.error : undefined;
         if (nativeError || event.type === 'session.error') {
@@ -95,6 +113,7 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
     rejectDone(abortError());
     await producer.catch(() => {});
     await pump?.catch(() => {});
+    await Promise.allSettled(replies);
     try { if (turn.enrichment && nativeID) await connection.deleteSession(nativeID, AbortSignal.timeout(2000)); }
     finally { await connection.close(); }
   }
