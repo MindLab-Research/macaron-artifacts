@@ -1,6 +1,6 @@
 import { Chat } from '@ai-sdk/react';
 import { DefaultChatTransport, type DataUIPart } from 'ai';
-import type { Artifact, ChatMessage, HarnessId, HarnessInfo, MessageData, Session, SessionSummary } from '../../shared/types';
+import type { Artifact, ChatMessage, ConnectionCommand, ConnectionView, HarnessId, HarnessInfo, MessageData, Session, SessionSummary } from '../../shared/types';
 import type { QuestionResponse } from '../../shared/questions';
 import { consumeMetadata } from './metadata';
 import { artifactEntryPath } from '../../shared/artifact-path';
@@ -294,6 +294,7 @@ export class WorkspaceStore {
   };
   approve = (id: string, approvalId: string, approved: boolean) => api(`/api/sessions/${id}/approvals/${encodeURIComponent(approvalId)}`, { method: 'POST', body: JSON.stringify({ approved }) });
   answer = (id: string, questionId: string, response: QuestionResponse) => api(`/api/sessions/${id}/questions/${encodeURIComponent(questionId)}`, { method: 'POST', body: JSON.stringify(response) });
+  respondConnection = (id: string, requestId: string, body: ConnectionCommand) => api(`/api/sessions/${id}/connections/${encodeURIComponent(requestId)}`, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ state?: ConnectionView }>;
   openArtifact = (id: string, path: string) => { const session = this.snapshot.sessions.find(session => session.id === id), entry = session && artifactEntryPath(path, session.cwd); if (!entry) return; this.selectedArtifacts.set(id, entry); this.dismissed.delete(id); this.publish(); };
   closeArtifact = (id: string) => { const path = this.selectedArtifacts.get(id); if (path) this.dismissed.set(id, path); this.selectedArtifacts.delete(id); this.publish(); };
 }

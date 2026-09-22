@@ -57,6 +57,7 @@ The previous WebUI, plugin launchers, and replay tools are archived on the [`v0`
 - Native text, reasoning, tool arguments, and command output stream at the granularity each harness exposes.
 - Switching conversations keeps background turns running. Refreshing reconnects to an active turn; explicit Stop cancels it.
 - Harness approval requests and pi tool approvals appear in the conversation.
+- Hermes connection requests appear as inline cards: open the provider's authorization page, check its backend-confirmed status, skip individual services, or continue. MCP install/enable requests accept only their advertised environment fields. Cards survive browser reconnects; stopped, expired, settled, or recovered historical cards are read-only. Authorization links and secret defaults are excluded from saved connection history. This requires a Hermes gateway exposing `connection.request`/`connection.update` and the connection-operation RPCs; it does not emulate OAuth on older gateways.
 - Save multiple Profiles per harness, select them for new or existing conversations, and override the main model for one conversation. Profile edits apply from the next turn.
 - Titles and follow-up suggestions run on disposable native forks after the main response, preserving its prompt prefix without blocking the composer.
 - Inline `ui4a/tsx` fences render as their source arrives. Files at `.artifacts/canvases/<name>.ui4a.tsx` render in Canvas, including relative TSX, TypeScript, and JSON imports.

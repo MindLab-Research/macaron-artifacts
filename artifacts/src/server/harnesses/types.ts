@@ -1,4 +1,4 @@
-import type { Approval, ChatChunk, HarnessId, HarnessInfo } from '../../shared/types.js';
+import type { Approval, ChatChunk, ConnectionState, HarnessId, HarnessInfo } from '../../shared/types.js';
 import type { ProfileConfig, ProfileOptions } from '../../shared/profiles.js';
 import type { QuestionRequest, QuestionResponse } from '../../shared/questions.js';
 
@@ -9,6 +9,21 @@ export interface ResolvedProfile {
   authToken?: string;
   nativeProfile?: string;
   nativeConfig?: Record<string, unknown>;
+}
+
+export interface ConnectionResponse {
+  targets: Array<{ name: string; status: 'approved' | 'skipped'; detail?: string; env?: Record<string, string> }>;
+  settled_by?: 'continue';
+}
+
+/**
+ * The narrow set of native operations a connection card may trigger. The adapter binds its own RPC,
+ * native session and profile for the whole turn, so a browser never names a transport, owner or method.
+ */
+export interface ConnectionControls {
+  status(): Promise<ConnectionState | undefined>;
+  wake(): Promise<void>;
+  respond(response: ConnectionResponse): Promise<void>;
 }
 
 export interface HarnessTurn {
@@ -27,6 +42,11 @@ export interface HarnessTurn {
   onNativeSession: (id: string) => void;
   approve: (request: Approval) => Promise<boolean>;
   ask: (request: Omit<QuestionRequest, 'id'>, signal?: AbortSignal) => Promise<QuestionResponse>;
+  /**
+   * Optional: only harnesses with a native connection protocol publish an operation. Adapters without
+   * one, and their tests, need no stub. The adapter mints one opaque id per operation and turn.
+   */
+  connection?: (id: string, state: ConnectionState, controls: ConnectionControls, actionable: boolean) => void;
 }
 export interface HarnessAdapter {
   id: HarnessId;

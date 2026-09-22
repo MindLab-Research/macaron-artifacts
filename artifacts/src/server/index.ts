@@ -16,6 +16,8 @@ import { safeError } from './harnesses/common.js';
 import { closeHermesConnections } from './harnesses/hermes.js';
 import { PairingManager, bearerToken, type PairingGrant, type PairingOptions } from './pairing.js';
 import { AccessPolicy, PasswordAuth, type PasswordSession } from './auth.js';
+import { ConnectionInputError, connectionActionable, redactConnection, validateConnectionResponse } from './connections.js';
+import type { ConnectionControls } from './harnesses/types.js';
 
 export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions; host?: string; password?: string; publicOrigin?: string }) {
   const access = new AccessPolicy(options), auth = await PasswordAuth.create(options.password);
@@ -23,6 +25,17 @@ export async function createArtifactsServer(options: { directory: string; instru
   const pairing = new PairingManager(options.pairing);
   const profiles = options.profiles ?? new ProfileStore(join(options.directory, 'profiles'));
   const deletingProfiles = new Set<string>(), bindingProfiles = new Map<string, number>();
+  // A native gateway that never answers must not hold an HTTP request open.
+  const bounded = async <T,>(promise: Promise<T>, ms = 20_000) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Connection timeout')), ms); timer.unref?.(); })]); }
+    finally { clearTimeout(timer); }
+  };
+  // Status is reported as the safe summary; a fresh authorization link only reaches the live stream.
+  const connectionStatus = async (controls: ConnectionControls) => {
+    const state = await bounded(controls.status());
+    return state ? { ...redactConnection(state), actionable: connectionActionable(state) } : undefined;
+  };
   // Reserve bindings before resolving async native config, so deletion cannot race a new session or a profile switch.
   const bindProfile = (id: string | null | undefined) => {
     if (id && deletingProfiles.has(id)) throw Object.assign(new Error('Profile 正在删除，请重新选择'), { status: 409 });
@@ -191,6 +204,26 @@ export async function createArtifactsServer(options: { directory: string; instru
           if (result === 'missing') return json(res, { error: 'Question is no longer pending.' }, 409);
           if (result === 'invalid') return json(res, { error: 'Answer every question using its allowed choices or a custom answer.' }, 400);
           return json(res, { ok: true });
+        }
+        if (segments[3] === 'connections' && segments[4] && req.method === 'POST') {
+          const input = await body(req, 64 * 1024);
+          // The id addresses one operation of one live turn. Controls were captured by the adapter,
+          // so a browser can never name a session, owner or RPC method of its own.
+          const pending = active.get(session.id)?.connection(decodeURIComponent(segments[4]));
+          if (!pending) return json(res, { error: 'Connection operation is no longer open.' }, 409);
+          const action = input.action === undefined ? 'respond' : input.action;
+          try {
+            if (action === 'status') return json(res, { state: await connectionStatus(pending.controls) });
+            if (action === 'check') { await bounded(pending.controls.wake()); return json(res, { state: await connectionStatus(pending.controls) }); }
+            if (action !== 'respond') return json(res, { error: 'Unsupported connection action.' }, 400);
+            await bounded(pending.controls.respond(validateConnectionResponse(input, pending.state)), 30_000);
+            return json(res, { ok: true });
+          } catch (error) {
+            if (error instanceof ConnectionInputError) return json(res, { error: error.message }, error.status);
+            // A provider rejection can quote the credentials it was given; never echo it verbatim.
+            console.warn('[connections]', { sessionId: session.id, action, error: 'Native connection request failed' });
+            return json(res, { error: '连接服务暂时没有接受这次操作，请稍后重试。' }, 502);
+          }
         }
         if (segments[3] === 'artifacts' && req.method === 'GET') return json(res, await listArtifacts(session.cwd));
         if (segments[3] === 'files') {

@@ -2,19 +2,31 @@ import { createWriteStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { finished } from 'node:stream/promises';
 import { createUIMessageStream, readUIMessageStream } from 'ai';
-import type { Approval, ChatChunk, ChatMessage, Session } from '../shared/types.js';
+import type { Approval, ChatChunk, ChatMessage, ConnectionState, Session } from '../shared/types.js';
 import { parseQuestionResponse, type QuestionRequest, type QuestionResponse } from '../shared/questions.js';
-import type { HarnessAdapter, ResolvedProfile } from './harnesses/types.js';
+import type { ConnectionControls, HarnessAdapter, ResolvedProfile } from './harnesses/types.js';
+import { redactConnection } from './connections.js';
 import { safeProfileError } from './harnesses/common.js';
 import { ArtifactObserver } from './artifacts.js';
 import { MetadataTasks } from './enrichment.js';
 import { SessionStore } from './store.js';
+
+/**
+ * A saved transcript keeps what happened, never a replayable authorization link or credential default,
+ * and never controls: the native process that owned them is gone by the time this is read back.
+ */
+const savedMessage = (message: ChatMessage): ChatMessage => ({
+  ...message,
+  parts: message.parts.map(part => part.type === 'data-connection' ? { ...part, data: { ...redactConnection(part.data), actionable: false } } : part),
+});
 
 export class ActiveConversation {
   readonly controller = new AbortController();
   readonly journal: ChatChunk[] = [];
   readonly approvals = new Map<string, (approved: boolean) => void>();
   readonly questions = new Map<string, { request: QuestionRequest; resolve: (response: QuestionResponse) => void }>();
+  /** Opaque browser request id -> the controls the adapter captured for that one operation. */
+  readonly connections = new Map<string, { state: ConnectionState; controls: ConnectionControls }>();
   private listeners = new Set<ReadableStreamDefaultController<ChatChunk>>();
   private ended = false;
   private mainSettled = false;
@@ -40,6 +52,8 @@ export class ActiveConversation {
     this.controller.abort();
     for (const decide of this.approvals.values()) decide(false);
     this.approvals.clear();
+    // A stopped turn keeps its visible summary but can no longer reach the native operation.
+    this.connections.clear();
   }
   answerQuestion(id: string, value: unknown): 'missing' | 'invalid' | undefined {
     const pending = this.questions.get(id);
@@ -47,6 +61,12 @@ export class ActiveConversation {
     const response = parseQuestionResponse(pending.request, value);
     if (!response) return 'invalid';
     pending.resolve(response);
+  }
+  /** The published snapshot the API validates a browser answer against. */
+  connection(id: string) {
+    const pending = this.connections.get(id);
+    if (!pending || this.mainSettled || this.controller.signal.aborted) return undefined;
+    return pending;
   }
   private cancelQuestions() { for (const pending of this.questions.values()) pending.resolve({ cancelled: true }); }
   private publish(chunk: ChatChunk) {
@@ -98,6 +118,12 @@ export class ActiveConversation {
             activeSignal.addEventListener('abort', abort, { once: true });
           });
         };
+        // Native op ids repeat across retries; a fresh browser id keeps an old card from steering a new operation.
+        const connection = (id: string, state: ConnectionState, controls: ConnectionControls, actionable: boolean) => {
+          if (actionable && !this.controller.signal.aborted && !this.mainSettled) this.connections.set(id, { state, controls });
+          else this.connections.delete(id);
+
+        };
         const previousAssistant = this.retry ? session.messages.findLast(message => message.role === 'assistant') : undefined;
         writer.write({ type: 'start', messageId: previousAssistant?.id ?? crypto.randomUUID() });
         writer.write({ type: 'start-step' });
@@ -110,7 +136,7 @@ export class ActiveConversation {
             // turn must resume its native thread rather than silently starting another one.
             nativeCheckpoint = this.store.save(session);
             void nativeCheckpoint.catch(error => { failure = error; this.controller.abort(); });
-          }, approve, ask };
+          }, approve, ask, connection };
           for await (const chunk of this.adapter.run(turn)) {
             if (nativeCheckpoint) { await nativeCheckpoint; nativeCheckpoint = undefined; }
             artifacts.accept(chunk); emit(chunk);
@@ -122,11 +148,13 @@ export class ActiveConversation {
           if (this.controller.signal.aborted) throw new Error('This turn was stopped.');
           this.mainSettled = true;
           this.cancelQuestions();
+          this.connections.clear();
           writer.write({ type: 'finish-step' });
           writer.write({ type: 'finish', finishReason: 'stop' });
         } catch (error) {
           failure = error; this.mainSettled = true;
           this.cancelQuestions();
+          this.connections.clear();
           emit({ type: 'error', errorText: safeProfileError(error, this.profile) });
           writer.write({ type: 'finish', finishReason: 'error', messageMetadata: { interrupted: true } });
         } finally { await artifacts.close(); }
@@ -139,7 +167,8 @@ export class ActiveConversation {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          if (!diskError) disk.write(`${JSON.stringify(value)}\n`);
+          // Live subscribers get the real authorization link; disk keeps only the safe historical summary.
+          if (!diskError) disk.write(`${JSON.stringify(value.type === 'data-connection' ? { ...value, data: { ...redactConnection(value.data), actionable: false } } : value)}\n`);
           this.publish(value);
         }
       } finally { reader.releaseLock(); }
@@ -150,11 +179,12 @@ export class ActiveConversation {
       for (const result of settled) if (result.status === 'rejected') failure ??= result.reason;
       disk.end(); await diskDone;
       if (this.latest) {
+        const latest = savedMessage(this.latest);
         const previousAssistant = this.retry ? before.findLast(message => message.role === 'assistant') : undefined;
-        if (previousAssistant && this.latest.role === 'assistant' && this.latest.id === previousAssistant.id) {
+        if (previousAssistant && latest.role === 'assistant' && latest.id === previousAssistant.id) {
           const index = before.lastIndexOf(previousAssistant);
-          session.messages = [...before.slice(0, index), { ...this.latest, parts: [...previousAssistant.parts, ...this.latest.parts] }];
-        } else session.messages = [...before, this.latest];
+          session.messages = [...before.slice(0, index), { ...latest, parts: [...previousAssistant.parts, ...latest.parts] }];
+        } else session.messages = [...before, latest];
       }
       session.status = failure || diskError ? 'error' : 'idle';
       session.error = diskError || failure ? safeProfileError(diskError || failure, this.profile) : undefined;
