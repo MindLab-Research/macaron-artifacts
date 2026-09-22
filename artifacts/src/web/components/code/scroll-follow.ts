@@ -6,7 +6,7 @@ export const scrollTop = (element: ScrollPosition) => Math.min(scrollLimit(eleme
 export type ScrollFollowState = { top: number; gap: number; following: boolean };
 
 /** One motion owner for streamed growth and explicit resume; resize must never replace an in-flight return with a jump. */
-export function createScrollFollow(element: HTMLElement, options: { following: boolean; enabled?: () => boolean; tolerance?: number; onChange?: (state: ScrollFollowState) => void }) {
+export function createScrollFollow(element: HTMLElement, options: { following: boolean; enabled?: () => boolean; tolerance?: number; resumeWhenContentFits?: boolean; onChange?: (state: ScrollFollowState) => void }) {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const anchor = element.style.overflowAnchor;
   const tolerance = options.tolerance ?? 2;
@@ -53,7 +53,7 @@ export function createScrollFollow(element: HTMLElement, options: { following: b
   const update = (instant = false) => {
     const bouncing = reconcile();
     const gap = scrollLimit(element);
-    if (!gap && paused) { paused = false; setFollowing(true); }
+    if (!gap && paused && options.resumeWhenContentFits !== false) { paused = false; setFollowing(true); }
     if (options.enabled?.() === false && !forced && gap - scrollTop(element) > tolerance) setFollowing(false);
     if (bouncing || touching || !active()) { stop(); notify(); return; }
     if (instant || reduced.matches) { stop(); position = gap; if (element.scrollTop !== gap) write(gap); forced = false; }
@@ -100,6 +100,11 @@ export function createScrollFollow(element: HTMLElement, options: { following: b
     pause: release,
     finish() { if (following) { forced = true; update(); } },
     grow() { if (!paused) setFollowing(true); update(); },
+    reset() {
+      if (!following) return;
+      // Source-to-preview replacement is our navigation, not a reverse scroll from the reader.
+      stop(); position = 0; wasBouncing = false; write(0); update();
+    },
     resume(behavior: ScrollBehavior = 'smooth') {
       paused = false; forced = true; setFollowing(true);
       // Explicit navigation may end an elastic gesture; passive growth never writes outside the native range.

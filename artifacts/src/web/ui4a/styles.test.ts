@@ -84,3 +84,14 @@ test("disposing the last surface while an update is queued does not recreate its
   await pending;
   expect(sheets.size).toBe(0);
 });
+
+test("settlement includes a newer class extraction queued while waiting", async () => {
+  const styles = surface();
+  await styles.update("p-4", true);
+  void styles.update("p-6", true);
+  const settled = styles.whenSettled();
+  void styles.update("h-[137px]", false);
+  await settled;
+  expect(css()).toContain("height:137px");
+  expect(css()).not.toContain(".p-4");
+});

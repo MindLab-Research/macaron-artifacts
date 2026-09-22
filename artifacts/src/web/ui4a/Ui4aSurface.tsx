@@ -44,15 +44,22 @@ export type Ui4aSurfaceProps = {
   sourceLayout?: "bounded" | "full";
   onSend?: (text: string) => void;
   onError?: (message: string) => void;
+  onFirstPaint?: () => void;
+  onRenderComplete?: () => void;
 };
 
-export function Ui4aSurface({ source, streaming, scope, sessionId, filename, revision, sourceLayout = "bounded", onSend, onError }: Ui4aSurfaceProps) {
+export function Ui4aSurface({ source, streaming, scope, sessionId, filename, revision, sourceLayout = "bounded", onSend, onError, onFirstPaint, onRenderComplete }: Ui4aSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
   const delivery = useRef<SurfaceDelivery | null>(null);
   const styles = useRef<ReturnType<typeof createSurfaceStyles> | null>(null);
   const latest = useRef<SurfaceFrame>({ source, streaming, filename, revision });
   const [error, setError] = useState<string | null>(null);
   const [painted, setPainted] = useState(false);
+  const [renderedFinal, setRenderedFinal] = useState(false);
+  const firstPaint = useEffectEvent(() => onFirstPaint?.());
+  const renderComplete = useEffectEvent(() => onRenderComplete?.());
+  useLayoutEffect(() => { if (painted) firstPaint(); }, [painted]);
+  useLayoutEffect(() => { if (painted && renderedFinal || error) renderComplete(); }, [painted, renderedFinal, error]);
   const send = useEffectEvent((text: string) => { if (!onSend) throw new Error("This preview cannot send messages"); onSend(text); });
   const report = useEffectEvent((problem: unknown) => {
     if (latest.current.streaming) return;
@@ -64,6 +71,7 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
   useLayoutEffect(() => {
     latest.current = { source, streaming, filename, revision };
     setError(null);
+    setRenderedFinal(false);
     if (!source.trim()) setPainted(false);
     delivery.current?.update(latest.current);
     void styles.current?.update(source, streaming);
@@ -106,7 +114,12 @@ export function Ui4aSurface({ source, streaming, scope, sessionId, filename, rev
       callbacks: {
         onReady: (_component, _url, code) => { readySource = code; if (code !== undefined) surfaceDelivery?.ready(code); },
         onError: (error, phase) => { if (!disposed) { surfaceDelivery?.failed(phase === "render" ? readySource : compilingSource, phase); report(error); } },
-        onRendered: (_component, _code, serial) => { if (!disposed) surfaceDelivery?.rendered(serial); },
+        onRendered: (_component, _code, serial) => {
+          if (disposed || !surfaceDelivery?.rendered(serial)) return;
+          const frame = latest.current;
+          void surfaceStyles.update(frame.source, false);
+          void surfaceStyles.whenSettled().then(() => { if (!disposed && latest.current === frame) setRenderedFinal(true); });
+        },
       },
     }).then((created) => {
       if (disposed) { created.detach(); return; }

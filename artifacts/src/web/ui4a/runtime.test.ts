@@ -19,6 +19,40 @@ const prepared = (label = "base"): PreparedImports => ({ importMap: { imports: {
 const tick = () => Promise.resolve();
 
 describe("surface delivery", () => {
+  test("only the latest terminal render settles the surface, including rewritten imports", async () => {
+    const submitted: { source: string; serial: number }[] = [];
+    const { renderer } = recorder();
+    const submit = (source: string, serial?: number) => { submitted.push({ source, serial: serial! }); };
+    renderer.pushCode = submit; renderer.finish = submit; renderer.render = submit;
+    const delivery = new SurfaceDelivery(renderer, async () => ({ ...prepared(), rewrite: source => `rewritten:${source}` }), () => {});
+    delivery.update(frame("first")); await tick();
+    const first = submitted.at(-1)!; delivery.compiling(first.source); delivery.ready(first.source);
+    delivery.update(frame("first", false));
+    expect(delivery.rendered(first.serial)).toBe(false);
+    const terminal = submitted.at(-1)!; delivery.compiling(terminal.source); delivery.ready(terminal.source);
+    delivery.update(frame("newer", false));
+    expect(delivery.rendered(terminal.serial)).toBe(false);
+    const latest = submitted.at(-1)!; delivery.compiling(latest.source); delivery.ready(latest.source);
+    expect(delivery.rendered(undefined)).toBe(false);
+    expect(delivery.rendered(latest.serial)).toBe(true);
+    expect(delivery.rendered(latest.serial)).toBe(false);
+    delivery.dispose();
+  });
+
+  test("identical source from an obsolete import revision cannot finish the current surface", async () => {
+    const submitted: { source: string; serial: number }[] = [];
+    const { renderer } = recorder();
+    renderer.render = (source, serial) => { submitted.push({ source, serial: serial! }); };
+    const delivery = new SurfaceDelivery(renderer, async () => prepared(), () => {});
+    delivery.update({ source: "same", streaming: false, revision: 1 }); await tick();
+    const old = submitted.at(-1)!; delivery.compiling(old.source); delivery.ready(old.source);
+    delivery.update({ source: "same", streaming: false, revision: 2 }); await tick();
+    expect(delivery.rendered(old.serial)).toBe(false);
+    const latest = submitted.at(-1)!; delivery.compiling(latest.source); delivery.ready(latest.source);
+    expect(delivery.rendered(latest.serial)).toBe(true);
+    delivery.dispose();
+  });
+
   test("streams only new characters, restarts rewritten prefixes, and finishes unchanged bytes", () => {
     const { renderer, calls } = recorder();
     deliverFrame(renderer, frame("abc"), null);

@@ -58,6 +58,11 @@ export function createSurfaceStyles(root: HTMLElement) {
   observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
   return {
     update,
+    async whenSettled() {
+      // A final DOM commit may enqueue class extraction after its source update.
+      let current: Promise<void>;
+      do { current = pending; await current; } while (current !== pending);
+    },
     dispose() {
       sequence++;
       observer.disconnect();

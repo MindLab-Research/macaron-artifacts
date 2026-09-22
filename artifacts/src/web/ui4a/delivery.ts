@@ -37,7 +37,7 @@ export class SurfaceDelivery {
   private committedSerial = 0;
   private committed: PreparedImports | null = null;
   private leases = new Set<PreparedImports>();
-  private submissions = new Map<number, { imports: PreparedImports; source: string; stage: "pending" | "compiling" | "ready" }>();
+  private submissions = new Map<number, { imports: PreparedImports; source: string; streaming: boolean; stage: "pending" | "compiling" | "ready" }>();
 
   constructor(private renderer: RendererPort, private resolve: (request: ImportRequest) => Promise<PreparedImports>, private onError: (error: Error) => void) {}
 
@@ -82,7 +82,7 @@ export class SurfaceDelivery {
     if (!this.latest || !this.prepared) return;
     const frame = { ...this.latest, source: this.prepared.rewrite(this.latest.source) };
     const serial = ++this.serial;
-    this.submissions.set(serial, { imports: this.prepared, source: frame.source, stage: "pending" });
+    this.submissions.set(serial, { imports: this.prepared, source: frame.source, streaming: frame.streaming, stage: "pending" });
     if (deliverFrame(this.renderer, frame, this.delivered, force, serial)) {
       this.delivered = frame;
       // The renderer compiles single-flight and coalesces queued frames. Only the latest unstarted frame can run.
@@ -102,13 +102,14 @@ export class SurfaceDelivery {
   ready(source: string) { for (const submission of this.submissions.values()) if (submission.stage === "compiling" && submission.source === source) submission.stage = "ready"; }
 
   rendered(serial?: number) {
-    if (serial === undefined || serial <= this.committedSerial) return; // A last-good rollback has no request serial.
+    if (serial === undefined || serial <= this.committedSerial) return false; // A last-good rollback has no request serial.
     const submission = this.submissions.get(serial);
-    if (!submission) return;
+    if (!submission) return false;
     this.committed = submission.imports;
     this.committedSerial = serial;
     for (const id of this.submissions.keys()) if (id <= serial) this.submissions.delete(id);
     this.collect();
+    return !!this.latest && !this.latest.streaming && !submission.streaming && submission.imports === this.prepared && submission.source === submission.imports.rewrite(this.latest.source);
   }
 
   failed(source: string | undefined, phase: "transform" | "compile" | "render") {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { createScrollFollow, type ScrollFollowState } from './scroll-follow';
+import { createCanvasFollow } from '../canvas-follow';
 
 class Viewport extends EventTarget {
   style = { overflowAnchor: 'auto' };
@@ -21,15 +22,24 @@ class Viewport extends EventTarget {
   }
 }
 
-const originals = { requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame, matchMedia: globalThis.matchMedia, Element: globalThis.Element, getComputedStyle: globalThis.getComputedStyle };
+const originals = { requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame, matchMedia: globalThis.matchMedia, Element: globalThis.Element, getComputedStyle: globalThis.getComputedStyle, ResizeObserver: globalThis.ResizeObserver };
 const originalClock = Object.getOwnPropertyDescriptor(performance, 'now');
 let now = 0, frameId = 0;
 let frames = new Map<number, FrameRequestCallback>();
 let media: EventTarget & { matches: boolean };
-let followers: ReturnType<typeof createScrollFollow>[];
+let followers: { destroy(): void }[];
+let observers: { resize(): void; elements: Element[]; disconnected: boolean }[];
 let clock: ReturnType<typeof mock>;
 beforeEach(() => {
-  now = 0; frameId = 0; frames = new Map(); followers = [];
+  now = 0; frameId = 0; frames = new Map(); followers = []; observers = [];
+  globalThis.ResizeObserver = class {
+    elements: Element[] = []; disconnected = false;
+    constructor(private callback: ResizeObserverCallback) { observers.push(this); }
+    observe(element: Element) { this.elements.push(element); }
+    unobserve() {}
+    disconnect() { this.disconnected = true; }
+    resize() { if (!this.disconnected) this.callback([], this); }
+  } as typeof ResizeObserver;
   media = Object.assign(new EventTarget(), { matches: false });
   globalThis.requestAnimationFrame = callback => { frames.set(++frameId, callback); return frameId; };
   globalThis.cancelAnimationFrame = id => { frames.delete(id); };
@@ -60,6 +70,64 @@ function advance(count = 1) {
     const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(now));
   }
 }
+
+function canvas(streaming = true, waitForRender = true) {
+  const element = new Viewport(), content = new Viewport();
+  const follow = createCanvasFollow(element as unknown as HTMLElement, content as unknown as HTMLElement, streaming, waitForRender);
+  followers.push(follow);
+  return { element, content, follow, observer: observers.at(-1)! };
+}
+
+test('Canvas follows layout growth through a late final render, then leaves static interactions alone', () => {
+  const { element, content, follow, observer } = canvas();
+  expect(observer.elements).toEqual([element, content] as unknown as Element[]);
+  advance(120); expect(element.scrollTop).toBe(800);
+  element.scrollHeight += 400; observer.resize(); advance(4);
+  const before = element.scrollTop;
+  follow.update(false); expect(element.scrollTop).toBe(before);
+  advance(120); expect(element.scrollTop).toBe(1200);
+  element.scrollHeight += 300; observer.resize(); follow.rendered(); advance(120);
+  expect(element.scrollTop).toBe(1500);
+  element.scrollHeight += 400; observer.resize(); advance(120);
+  expect(element.scrollTop).toBe(1500);
+});
+
+test('Canvas replaces a scrolled source with a taller first preview from rest without losing follow', () => {
+  const { element, follow, observer } = canvas();
+  advance(120); expect(element.scrollTop).toBe(800);
+  element.scrollHeight = 1600; follow.preview(); expect(element.scrollTop).toBe(0);
+  observer.resize(); advance(); const first = element.scrollTop;
+  expect(first).toBeGreaterThan(0); expect(first).toBeLessThan((element.scrollHeight - element.clientHeight) * 0.01);
+  advance(); expect(element.scrollTop - first).toBeGreaterThan(first);
+  advance(120); expect(element.scrollTop).toBe(1400);
+});
+
+test('Canvas keeps manual ownership through short previews, new growth and completion', () => {
+  const { element, follow, observer } = canvas();
+  advance(120); element.input('wheel', { deltaY: -1 }); element.scroll(150);
+  element.scrollHeight = 800; follow.preview(); expect(element.scrollTop).toBe(150);
+  element.scrollHeight = 100; element.rawTop = 0; observer.resize();
+  element.scrollHeight = 1200; observer.resize(); follow.update(false); follow.rendered(); advance(120);
+  expect(element.scrollTop).toBe(0);
+  follow.update(true); observer.resize(); advance(120); expect(element.scrollTop).toBe(0);
+  element.scroll(1000); element.scrollHeight += 100; observer.resize(); advance(120);
+  expect(element.scrollTop).toBe(1100);
+});
+
+test('Canvas teardown removes old observers and motion; a static replacement opens at its beginning', () => {
+  const previous = canvas(); advance(4); expect(frames.size).toBe(1);
+  previous.follow.destroy(); expect(previous.observer.disconnected).toBe(true); expect(frames.size).toBe(0);
+  previous.element.scrollHeight += 100; previous.observer.resize(); advance(120); expect(frames.size).toBe(0);
+  const next = canvas(false); next.element.scrollHeight += 100; next.observer.resize(); advance(120);
+  expect(next.element.scrollTop).toBe(0);
+  next.follow.update(true); next.observer.resize(); advance(120); expect(next.element.scrollTop).toBe(900);
+});
+
+test('explicit Canvas source view finishes its last spring without waiting for a renderer', () => {
+  const { element, follow, observer } = canvas(true, false);
+  advance(4); follow.update(false); advance(120); expect(element.scrollTop).toBe(800);
+  element.scrollHeight += 100; observer.resize(); advance(120); expect(element.scrollTop).toBe(800);
+});
 
 test('stream growth accelerates smoothly and settles without losing follow to its own scroll events', () => {
   const { element, follow, state } = setup();
