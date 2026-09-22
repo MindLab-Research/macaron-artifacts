@@ -1,4 +1,4 @@
-import { memo, useCallback, useSyncExternalStore } from 'react';
+import { memo, useCallback, useState, useSyncExternalStore } from 'react';
 import { useChat, type Chat } from '@ai-sdk/react';
 import type { ChatMessage, SessionSummary } from '../../../shared/types';
 import type { QuestionResponse } from '../../../shared/questions';
@@ -6,6 +6,8 @@ import type { WorkspaceStore } from '../../chat/store';
 import { useStickToBottom } from './useStickToBottom';
 import { MessageBody } from './MessageBody';
 import { ToolCall } from './ToolCall';
+import { ToolGroup } from './ToolGroup';
+import { isReadTool, readRunAt } from './tool-presentation';
 import { ApprovalCard } from './ApprovalCard';
 import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
@@ -54,6 +56,8 @@ function SessionComposer({ store, sessionId, busy, onSend }: { store: WorkspaceS
 }
 
 const Message = memo(function Message({ message, streaming, active, sessionId, cwd, onSend, onArtifact, onApprove, onAnswer }: { message: ChatMessage; streaming: boolean; active: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown>; onAnswer: (id: string, response: QuestionResponse) => Promise<unknown> }) {
+  // Do not replace live tool DOM on completion: readers may have expanded or selected its output.
+  const [groupReads] = useState(!streaming);
   // The server forwards one part per output delta; the joined text exists only here.
   const outputs = new Map<string, string>();
   const firstDelta = new Map<string, number>();
@@ -68,6 +72,11 @@ const Message = memo(function Message({ message, streaming, active, sessionId, c
   }
   return <article data-message-role={message.role} className={message.role === 'user' ? 'theme-bubble max-w-[85%] self-end rounded-2xl px-4 py-2 text-sm' : 'flex flex-col gap-3'}>
     {message.parts.map((part, index) => {
+      if (groupReads && !streaming && isReadTool(part)) {
+        const group = readRunAt(message.parts, index);
+        if (group) return <ToolGroup key={index} parts={group} cwd={cwd} outputs={outputs} onArtifact={onArtifact} />;
+        if (index > 0 && isReadTool(message.parts[index - 1])) return null;
+      }
       if (part.type === 'text') return <MessageBody key={index} text={part.text} messageId={`${message.id}:${index}`} streaming={streaming} sessionId={sessionId} onSend={onSend} allowUi={message.role === 'assistant'} />;
       if (part.type === 'reasoning') {
         const parts = reasoningRunAt(message.parts, index);
