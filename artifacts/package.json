@@ -20,6 +20,7 @@
     "@openclaw/gateway-client": "2026.9.3",
     "@openclaw/gateway-protocol": "2026.9.3",
     "@opencode-ai/sdk": "1.18.29",
+    "@opencode/client": "2.0.13",
     "@shikijs/langs": "4.4.3",
     "@shikijs/stream": "4.4.3",
     "@shikijs/themes": "4.4.3",

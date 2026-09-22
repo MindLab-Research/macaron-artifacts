@@ -8,6 +8,8 @@ import type { Agent, Config, ConfigProvidersResponses, PermissionRuleset, Provid
 import type { ProfileOptions } from '../../shared/profiles.js';
 import type { ResolvedProfile } from './types.js';
 import { abortable, abortError, record, safeError } from './common.js';
+import { requireOpenCodeBinary } from './opencode-binary.js';
+import { openCodeV1Events } from './opencode-v1-sse.js';
 
 export type OpenCodePrompt = NonNullable<SessionPromptAsyncData['body']>;
 export type OpenCodeDefaults = { model?: string; agent: string; variant?: string };
@@ -110,6 +112,7 @@ export default { id: 'macaron-artifacts-guard', async server({ client }) {
 
 export async function startOpenCode(cwd: string, signal: AbortSignal, profile?: ResolvedProfile, model?: string): Promise<OpenCodeConnection> {
   if (signal.aborted) throw abortError();
+  const binary = await requireOpenCodeBinary(1);
   const nativeConfig = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}');
   if (!nativeConfig || typeof nativeConfig !== 'object' || Array.isArray(nativeConfig) || (nativeConfig.plugin !== undefined && !Array.isArray(nativeConfig.plugin))) throw new Error('Invalid OPENCODE_CONFIG_CONTENT');
   const configured = openCodeProfileConfig(nativeConfig, profile, model);
@@ -118,7 +121,7 @@ export async function startOpenCode(cwd: string, signal: AbortSignal, profile?: 
   catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
   const config = { ...configured, plugin: [...(configured.plugin ?? []), pathToFileURL(plugin).href] };
   const password = crypto.randomUUID();
-  const child = spawn(process.env.MACARON_OPENCODE_PATH || 'opencode', ['serve', '--hostname=127.0.0.1', '--port=0'], {
+  const child = spawn(binary, ['serve', '--hostname=127.0.0.1', '--port=0'], {
     cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config), MACARON_OPENCODE_GUARD_FILE: guard, OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: password },
   });
   const lifetime = new AbortController();
@@ -171,8 +174,8 @@ export async function startOpenCode(cwd: string, signal: AbortSignal, profile?: 
       async copyPermissions(sessionID, permission, signal) { await client.session.update({ sessionID, permission }, options(signal)); },
       async blockTools(sessionID) { await writeFile(guard, JSON.stringify([sessionID]), { mode: 0o600 }); },
       async *events(signal) {
-        const result = await client.event.subscribe({}, { ...options(signal), sseMaxRetryAttempts: 1, onSseError(error) { if (!signal.aborted) throw error; } });
-        yield* result.stream;
+        const url = new URL('/event', baseUrl); url.searchParams.set('directory', cwd);
+        yield* openCodeV1Events(url, `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`, options(signal).signal);
       },
       async prompt(sessionID, prompt, signal) { await client.session.promptAsync({ sessionID, ...prompt }, options(signal)); },
       async retry(sessionID, messageID, text, signal) { await client.v2.session.prompt({ sessionID, id: messageID, prompt: { text }, resume: true }, options(signal)); },

@@ -1,6 +1,6 @@
 # Macaron Artifacts
 
-One React WebUI for coding harnesses. Install the `macaron-artifacts` package, start one local server, then choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw when creating a conversation. All six use the same chat, approvals, Canvas, and Shiki themes.
+One React WebUI for coding harnesses. Install the `macaron-artifacts` package, start one local server, then choose Claude Code, Codex, OpenCode v1, OpenCode v2, pi, Hermes, or OpenClaw when creating a conversation. All seven choices use the same chat, approvals, Canvas, and Shiki themes.
 
 ## Install and run
 
@@ -80,8 +80,11 @@ CLI options override their environment variables.
 | `MACARON_ALLOWED_ORIGINS` | Comma-separated hosted WebUI origins, default `https://artifacts.macaron.im` when pairing is enabled |
 | `MACARON_CLAUDE_PATH` | Claude Code executable |
 | `MACARON_CODEX_PATH` | Codex executable |
-| `MACARON_OPENCODE_PATH` | OpenCode executable |
+| `MACARON_OPENCODE_PATH` | OpenCode v1 executable (default `opencode`) |
+| `MACARON_OPENCODE_V2_PATH` | OpenCode v2 executable (default `opencode2`, then a major-checked `opencode`) |
 | `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
+
+OpenCode v1 and v2 appear side by side in **New conversation** and **Profiles**. Existing `opencode` sessions and Profiles remain v1; `opencode-v2` is independent. Each executable is major-checked before startup, so selecting the wrong generation fails immediately with the relevant environment variable. Native configuration and credentials remain untouched. The adapters pin `@opencode-ai/sdk@1.18.29` for v1 (its `/v2/client` export is not native v2) and `@opencode/client@2.0.13` for native v2.
 
 Open **Profiles** in the sidebar to configure models, reasoning effort, service endpoints and credentials. Codex Profiles use its native `$CODEX_HOME/<name>.config.toml` files (current Codex CLI); Claude Code, OpenCode and pi use app-managed overrides. API keys and tokens are stored in a private local file under the data directory and are never returned to the browser. See [Profiles](artifacts/README.md#profiles) for supported settings and inheritance.
 

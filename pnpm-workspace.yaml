@@ -18,7 +18,12 @@ minimumReleaseAgeExclude:
   - '@earendil-works/pi-coding-agent@0.87.0'
   - '@earendil-works/pi-telemetry@0.87.0'
   - '@earendil-works/pi-tui@0.87.0'
+  # Exact native OpenCode v2 protocol release; do not relax other packages.
+  - '@opencode/client@2.0.13'
+  - '@opencode/protocol@2.0.13'
+  - '@opencode/schema@2.0.13'
 allowBuilds:
   '@google/genai': false
   esbuild: true
   protobufjs: false
+  msgpackr-extract: false

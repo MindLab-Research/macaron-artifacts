@@ -20,7 +20,7 @@ export function NewSessionDialog({ harnesses, initialHarness, initialCwd, onClos
     <form aria-busy={busy} onSubmit={event => { event.preventDefault(); void submit(); }} className="flex flex-col gap-4">
       <RadioGroup name="harness" value={harness} onChange={value => { setHarness(value); setProfileId(''); setModel(''); }} disabled={busy} aria-orientation="horizontal" className="flex flex-col gap-2">
         <Label className="text-xs font-medium text-muted">Harness</Label>
-        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
           {harnesses.map(item => <HeadlessField key={item.id} disabled={busy || !item.available} className="min-w-0">
             <Radio as="button" type="button" value={item.id} title={item.available ? item.name : `${item.name} · 未安装`} className="interactive flex h-16 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-control-border px-1 text-xs leading-4 text-fg [&:not([data-checked]):not([data-disabled]):hover]:bg-surface-3 [&:not([data-checked]):not([data-disabled]):hover]:text-hover-fg data-[checked]:border-accent data-[checked]:bg-accent data-[checked]:font-semibold data-[checked]:text-accent-fg data-[checked]:hover:bg-accent-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
               <HarnessIcon harness={item.id} />

@@ -6,7 +6,7 @@ import hermes from '@lobehub/icons-static-svg/icons/hermesagent.svg?url';
 import openclaw from '@lobehub/icons-static-svg/icons/openclaw.svg?url';
 import type { HarnessId } from '../../shared/types';
 
-const icons: Record<HarnessId, string> = { 'claude-code': claudeCode, codex, opencode: openCode, pi, hermes, openclaw };
+const icons: Record<HarnessId, string> = { 'claude-code': claudeCode, codex, opencode: openCode, 'opencode-v2': openCode, pi, hermes, openclaw };
 
 export function HarnessIcon({ harness }: { harness: HarnessId }) {
   // A mask lets upstream brand artwork inherit the selected button's accessible theme color.

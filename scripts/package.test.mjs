@@ -84,7 +84,7 @@ async function files(directory, prefix = '') {
   return paths;
 }
 
-test('the single published package installs in isolation and serves six harnesses and all client assets', { timeout: 300_000 }, async t => {
+test('the single published package installs in isolation and serves seven harnesses and all client assets', { timeout: 300_000 }, async t => {
   const temporary = await mkdtemp(join(tmpdir(), 'macaron-package-'));
   let app;
   t.after(async () => { try { await app?.stop(); } finally { await rm(temporary, { recursive: true, force: true }); } });
@@ -115,10 +115,10 @@ test('the single published package installs in isolation and serves six harnesse
   assert.equal(manifest.engines.node, '>=22.19');
   assert.deepEqual(Object.keys(manifest.bin), [packageName], 'Legacy launcher names must not be distributed');
   assert.equal(manifest.bin[packageName].replace(/^\.\//, ''), 'bin/macaron-artifacts.mjs');
-  for (const dependency of ['@anthropic-ai/claude-agent-sdk', '@opencode-ai/sdk', '@earendil-works/pi-coding-agent', 'ai', 'partial-json']) assert.ok(manifest.dependencies[dependency], `${dependency} must be a runtime dependency`);
+  for (const dependency of ['@anthropic-ai/claude-agent-sdk', '@opencode-ai/sdk', '@opencode/client', '@earendil-works/pi-coding-agent', 'ai', 'partial-json']) assert.ok(manifest.dependencies[dependency], `${dependency} must be a runtime dependency`);
   for (const legacy of ['fastify', '@fastify/static', 'node-pty', '@openai/codex-sdk', '@agentclientprotocol/sdk', '@genui/diagnostics']) assert.equal(manifest.dependencies[legacy], undefined, `${legacy} belongs to a retired application`);
   for (const [name, version] of Object.entries(manifest.dependencies)) assert.ok(!/^(?:workspace:|link:|file:)/.test(version), `${name} must resolve outside this workspace`);
-  await run(process.execPath, ['--input-type=module', '--eval', "import assert from 'node:assert/strict'; const ai = await import('ai'), json = await import('partial-json'), claude = await import('@anthropic-ai/claude-agent-sdk'), opencode = await import('@opencode-ai/sdk/v2/client'), pi = await import('@earendil-works/pi-coding-agent'); assert.equal(typeof ai.createUIMessageStream, 'function'); assert.equal(typeof json.parse, 'function'); assert.equal(typeof claude.query, 'function'); assert.equal(typeof opencode.createOpencodeClient, 'function'); assert.equal(typeof pi.createAgentSession, 'function'); assert.equal(typeof pi.SessionManager.inMemory, 'function'); assert.equal(pi.getAgentDir(), process.env.PI_CODING_AGENT_DIR); assert.ok(pi.VERSION);"], consumer, env);
+  await run(process.execPath, ['--input-type=module', '--eval', "import assert from 'node:assert/strict'; const ai = await import('ai'), json = await import('partial-json'), claude = await import('@anthropic-ai/claude-agent-sdk'), opencode = await import('@opencode-ai/sdk/v2/client'), opencodeV2 = await import('@opencode/client'), pi = await import('@earendil-works/pi-coding-agent'); assert.equal(typeof opencodeV2.OpenCode.make, 'function'); assert.equal(typeof ai.createUIMessageStream, 'function'); assert.equal(typeof json.parse, 'function'); assert.equal(typeof claude.query, 'function'); assert.equal(typeof opencode.createOpencodeClient, 'function'); assert.equal(typeof pi.createAgentSession, 'function'); assert.equal(typeof pi.SessionManager.inMemory, 'function'); assert.equal(pi.getAgentDir(), process.env.PI_CODING_AGENT_DIR); assert.ok(pi.VERSION);"], consumer, env);
   const contents = await files(installed);
   assert.ok(contents.includes('artifacts/dist/server.js'));
   assert.ok(contents.includes('artifacts/dist/web/index.html'));
@@ -134,16 +134,23 @@ test('the single published package installs in isolation and serves six harnesse
   // SDK. Creating app sessions below does not start a native turn or call a provider.
   const cli = join(temporary, 'native-version-stub');
   await writeFile(cli, `#!${process.execPath}\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(91);\nconsole.log('package-smoke-native 1.0.0');\n`, { mode: 0o755 });
-  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_OPENCODE_PATH = cli; env.MACARON_HERMES_PATH = cli; env.MACARON_OPENCLAW_PATH = cli;
+  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_HERMES_PATH = cli; env.MACARON_OPENCLAW_PATH = cli;
+  for (const major of [1, 2]) {
+    const path = join(temporary, `opencode-v${major}-version-stub`);
+    await writeFile(path, `#!${process.execPath}\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(91);\nconsole.log('${major === 1 ? '1.18.29' : 'opencode v2.0.13'}');\n`, { mode: 0o755 });
+    env[major === 1 ? 'MACARON_OPENCODE_PATH' : 'MACARON_OPENCODE_V2_PATH'] = path;
+  }
   const guidance = await readFile(join(installed, 'artifacts/skills/ui4a/SKILL.md'), 'utf8');
   assert.match(guidance, /ui4a\/tsx/); assert.match(guidance, /\$ui4a\/ui/); assert.match(guidance, /\.artifacts\//);
   app = await start(bin, consumer, env, join(temporary, 'sessions'));
   assert.deepEqual(await (await fetch(`${app.base}/api/auth`)).json(), { enabled: false, authenticated: true });
   const harnesses = await (await fetch(`${app.base}/api/harnesses`)).json();
-  assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'hermes', 'openclaw', 'opencode', 'pi']);
+  assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'hermes', 'openclaw', 'opencode', 'opencode-v2', 'pi']);
   for (const harness of harnesses) {
     assert.equal(harness.available, true, `${harness.id} must be available from its CLI stub or bundled SDK`);
-    assert.match(harness.detail, harness.id === 'pi' ? /^pi SDK \S+/ : /package-smoke-native/);
+    assert.match(harness.detail, harness.id === 'pi' ? /^pi SDK \S+/ : harness.id === 'opencode' ? /^1\.18\.29$/ : harness.id === 'opencode-v2' ? /^opencode v2\.0\.13$/ : /package-smoke-native/);
+    if (harness.id === 'opencode') assert.equal(harness.name, 'OpenCode v1');
+    if (harness.id === 'opencode-v2') assert.equal(harness.name, 'OpenCode v2');
     const response = await fetch(`${app.base}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ harness: harness.id, cwd: consumer }) });
     assert.equal(response.status, 201);
     assert.equal((await response.json()).harness, harness.id);
@@ -204,5 +211,5 @@ test('the single published package installs in isolation and serves six harnesse
   });
   assert.equal(proxyLogin.statusCode, 200, 'The command-line public origin must override the environment');
   assert.match(proxyLogin.headers['set-cookie'][0], /; Secure/);
-  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, six harnesses, OpenCode/pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files, password login/logout, restart invalidation, required remote password, CLI/environment precedence`);
+  t.diagnostic(`Verified ${packageName}: isolated install, one launcher, seven harnesses, OpenCode v1/v2/pi SDK imports, bundled pi availability, packaged guidance, ${assets.length} client files, password login/logout, restart invalidation, required remote password, CLI/environment precedence`);
 });

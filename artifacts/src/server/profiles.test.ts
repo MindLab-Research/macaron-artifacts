@@ -56,6 +56,17 @@ describe('profile validation', () => {
 });
 
 describe('app profiles and credentials', () => {
+  test('OpenCode v1 and v2 profiles retain distinct persisted generations', async () => {
+    const { store, path, helpers } = await fixture();
+    const first = await store.save(appInput({ model: 'vendor/v1', variant: 'high' }, { harness: 'opencode', name: 'Work' }));
+    const second = await store.save(appInput({ model: 'vendor/v2', agentModels: { explore: 'vendor/worker' } }, { harness: 'opencode-v2', name: 'Work' }));
+    const reloaded = new ProfileStore(path, helpers, unchangedClaude); await reloaded.load();
+    expect((await reloaded.resolve(first.id, 'opencode', '/tmp'))?.config.model).toBe('vendor/v1');
+    expect((await reloaded.resolve(second.id, 'opencode-v2', '/tmp'))?.config.model).toBe('vendor/v2');
+    await expect(reloaded.resolve(first.id, 'opencode-v2', '/tmp')).rejects.toMatchObject({ status: 400 });
+    await expect(reloaded.resolve(second.id, 'opencode', '/tmp')).rejects.toMatchObject({ status: 400 });
+    expect((await reloaded.list()).filter(item => item.name === 'Work').map(item => item.harness).sort()).toEqual(['opencode', 'opencode-v2']);
+  });
   test('persists private files and returns only credential state in every DTO', async () => {
     const { store, path, helpers } = await fixture();
     const created = await store.save(appInput({ model: 'opus', authMode: 'api-key' }, { credentials: { apiKey: 'private-key', authToken: 'inactive-token' } }));

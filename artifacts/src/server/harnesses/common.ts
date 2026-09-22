@@ -25,7 +25,9 @@ export function record(value: unknown): Record<string, unknown> { return value !
 export function string(value: unknown): string { return typeof value === 'string' ? value : ''; }
 export function abortError(): Error { return new DOMException('The turn was interrupted', 'AbortError'); }
 export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(abortError());
+  // The operation is already running when passed in. Even an already-aborted caller
+  // must observe its rejection (fetch commonly rejects on the next microtask).
+  if (signal.aborted) { void promise.catch(() => {}); return Promise.reject(abortError()); }
   return new Promise((resolve, reject) => {
     const abort = () => reject(abortError());
     signal.addEventListener('abort', abort, { once: true });

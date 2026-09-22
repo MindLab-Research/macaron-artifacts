@@ -38,6 +38,7 @@
     "@openclaw/gateway-client": "2026.9.3",
     "@openclaw/gateway-protocol": "2026.9.3",
     "@opencode-ai/sdk": "1.18.29",
+    "@opencode/client": "2.0.13",
     "ai": "7.0.93",
     "partial-json": "0.1.7",
     "toml-eslint-parser": "1.0.3"

@@ -1,6 +1,7 @@
 import type { ChatChunk } from '../../shared/types.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
-import { abortable, abortError, EventQueue, executableVersion, record, safeError, string } from './common.js';
+import { abortable, abortError, EventQueue, record, safeError, string } from './common.js';
+import { openCodeBinary } from './opencode-binary.js';
 import { OpenCodeEventMapper } from './opencode-events.js';
 import { startOpenCode, type OpenCodeConnection, type OpenCodePrompt } from './opencode-server.js';
 import { nativeQuestions } from './questions.js';
@@ -122,8 +123,8 @@ export async function* runOpenCodeConnection(turn: HarnessTurn, connection: Open
 export const openCodeAdapter: HarnessAdapter = {
   id: 'opencode',
   async info() {
-    const version = await executableVersion(process.env.MACARON_OPENCODE_PATH || 'opencode');
-    return { id: 'opencode', name: 'OpenCode', available: Boolean(version), detail: version || 'Install the OpenCode CLI', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: false, commandOutputDeltas: false, approvals: true, fork: true } };
+    const result = await openCodeBinary(1);
+    return { id: 'opencode', name: 'OpenCode v1', available: result.available, detail: result.detail, capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: false, commandOutputDeltas: false, approvals: true, fork: true } };
   },
   async profileOptions(cwd, profile) {
     const signal = AbortSignal.timeout(20_000), connection = await startOpenCode(cwd, signal, profile);

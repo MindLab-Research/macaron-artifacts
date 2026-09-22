@@ -13,12 +13,13 @@ type NativeOverride = { revision: string; authMode?: ProfileConfig['authMode'] }
 type ProfileData = { version: 1; profiles: StoredProfile[]; credentials: Record<string, Credentials>; native: Record<string, NativeOverride>; pendingNative?: Record<string, true> };
 type NativeProfiles = { list: typeof listCodexProfiles; save: typeof saveCodexProfile; remove: typeof deleteCodexProfile; resolve: typeof resolveCodexProfile; defaults?: typeof resolveCodexDefaultProfile };
 const nativeProfiles: NativeProfiles = { list: listCodexProfiles, save: saveCodexProfile, remove: deleteCodexProfile, resolve: resolveCodexProfile, defaults: resolveCodexDefaultProfile };
-const harnesses: HarnessId[] = ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'openclaw'];
+const harnesses: HarnessId[] = ['claude-code', 'codex', 'opencode', 'opencode-v2', 'pi', 'hermes', 'openclaw'];
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const fields: Record<HarnessId, string[]> = {
   'claude-code': ['model', 'subagentModel', 'effort', 'baseUrl', 'authMode', 'forceSubagentModel', 'modelAliases', 'fineGrainedToolStreaming'],
   codex: ['model', 'subagentModel', 'effort', 'subagentEffort', 'provider', 'baseUrl', 'authMode', 'features'],
   opencode: ['model', 'provider', 'baseUrl', 'authMode', 'agent', 'variant', 'agentModels'],
+  'opencode-v2': ['model', 'provider', 'baseUrl', 'authMode', 'agent', 'variant', 'agentModels'],
   pi: ['model', 'provider', 'baseUrl', 'authMode', 'effort'],
   hermes: ['model', 'effort', 'gatewayUrl', 'nativeProfile', 'authMode'],
   openclaw: ['model', 'effort', 'gatewayUrl', 'nativeProfile', 'agent', 'authMode'],
