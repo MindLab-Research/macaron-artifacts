@@ -11,6 +11,13 @@ minimumReleaseAgeExclude:
   # Reviewed GenUI releases replace the pinned previews before their 24-hour release-age cutoff.
   - 'partial-react@0.0.7'
   - 'partial-tsx@0.0.4'
+  # Pi SDK 0.87.0 upgrades for issue #252 transcript context compatibility
+  - '@earendil-works/chord@0.87.0'
+  - '@earendil-works/pi-agent-core@0.87.0'
+  - '@earendil-works/pi-ai@0.87.0'
+  - '@earendil-works/pi-coding-agent@0.87.0'
+  - '@earendil-works/pi-telemetry@0.87.0'
+  - '@earendil-works/pi-tui@0.87.0'
 allowBuilds:
   '@google/genai': false
   esbuild: true
