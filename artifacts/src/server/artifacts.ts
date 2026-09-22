@@ -65,7 +65,8 @@ export async function listArtifacts(cwd: string, revision = Date.now()): Promise
 export class ArtifactObserver {
   private inputs = new Map<string, string>();
   private names = new Map<string, string>();
-  private sources = new Map<string, string>();
+  private sources = new Map<string, Artifact>();
+  private drafts = new Map<string, string>();
   private watchers: FSWatcher[] = [];
   private revision = Date.now();
   private closed = false;
@@ -90,32 +91,59 @@ export class ArtifactObserver {
     this.scanning = (async () => {
       while (this.dirty && !this.closed) {
         this.dirty = false;
-        const files = await listArtifacts(this.cwd, ++this.revision);
+        const revision = ++this.revision, files = await listArtifacts(this.cwd, revision);
         if (this.closed) return;
+        const active = new Set(this.drafts.values()), saved = new Set(files.map(file => file.path));
         for (const artifact of files) {
-          this.sources.set(artifact.path, artifact.source);
-          this.emit({ type: 'data-artifact', id: artifact.path, data: artifact });
+          // A watcher may read the previous file or a write's intermediate truncation.
+          // Native input remains authoritative until its tool completes; older scans also lose to newer input.
+          const draft = this.sources.get(artifact.path);
+          if (!active.has(artifact.path) && (draft?.revision ?? 0) > revision) continue;
+          // Invalidate relative modules on disk refresh without reading them for every source token.
+          this.publish({ ...(active.has(artifact.path) && draft ? draft : artifact), revision: ++this.revision, importsRevision: revision });
+        }
+        for (const artifact of this.sources.values()) {
+          // An aborted first write may never reach disk. Keep the captured preview,
+          // but stop its loading state; the corresponding tool still reports its failure.
+          if (artifact.streaming && (active.has(artifact.path) || artifact.revision <= revision) && !saved.has(artifact.path)) this.publish({ ...artifact, streaming: active.has(artifact.path), revision: ++this.revision, importsRevision: revision });
         }
       }
     })().finally(() => { this.scanning = undefined; });
     return this.scanning;
   }
+  private publish(artifact: Artifact) { this.sources.set(artifact.path, artifact); this.emit({ type: 'data-artifact', id: artifact.path, data: artifact }); }
+  private settle(toolCallId: string) {
+    const path = this.drafts.get(toolCallId);
+    this.drafts.delete(toolCallId); this.inputs.delete(toolCallId); this.names.delete(toolCallId);
+    if (!path) return false;
+    const source = this.sources.get(path);
+    if (source) this.sources.set(path, { ...source, revision: ++this.revision });
+    return true;
+  }
   accept(chunk: ChatChunk) {
-    if (chunk.type === 'tool-input-start') this.names.set(chunk.toolCallId, chunk.toolName);
-    if (chunk.type !== 'tool-input-delta') return;
+    if (this.closed) return;
+    if (chunk.type === 'tool-input-start') { this.names.set(chunk.toolCallId, chunk.toolName); return; }
+    if (chunk.type === 'tool-input-error' || chunk.type === 'tool-output-error' || chunk.type === 'tool-output-denied' || (chunk.type === 'tool-output-available' && !chunk.preliminary)) {
+      if (this.settle(chunk.toolCallId)) void this.refresh().catch(() => {});
+      return;
+    }
+    if (chunk.type !== 'tool-input-delta' && chunk.type !== 'tool-input-available') return;
     // Only full-file writes produce speculative frames. An edit's new_string is not a whole module.
     // Checked before accumulating: every other tool's input would be parsed once per delta and thrown away.
-    if (!/write|create/i.test(this.names.get(chunk.toolCallId) ?? '')) return;
-    const json = (this.inputs.get(chunk.toolCallId) ?? '') + chunk.inputTextDelta;
-    this.inputs.set(chunk.toolCallId, json);
+    if (!/write|create/i.test(chunk.type === 'tool-input-available' ? chunk.toolName : this.names.get(chunk.toolCallId) ?? '')) return;
     try {
-      const input = parse(json) as Record<string, unknown>;
-      const path = input.file_path ?? input.path;
+      let input: Record<string, unknown>;
+      if (chunk.type === 'tool-input-delta') {
+        const json = (this.inputs.get(chunk.toolCallId) ?? '') + chunk.inputTextDelta;
+        this.inputs.set(chunk.toolCallId, json); input = parse(json) as Record<string, unknown>;
+      } else input = chunk.input as Record<string, unknown>;
+      const path = input?.file_path ?? input?.path ?? input?.filePath;
       if (typeof path !== 'string' || typeof input.content !== 'string') return;
       const rel = relative(this.cwd, ui4aPath(this.cwd, path)).split(sep).join('/');
-      if (!isArtifactEntry(rel) || this.sources.get(rel) === input.content) return;
-      this.sources.set(rel, input.content);
-      this.emit({ type: 'data-artifact', id: rel, data: { path: rel, source: input.content, streaming: true, revision: ++this.revision } });
+      if (!isArtifactEntry(rel)) return;
+      this.drafts.set(chunk.toolCallId, rel);
+      if (this.sources.get(rel)?.source === input.content && this.sources.get(rel)?.streaming) return;
+      this.publish({ path: rel, source: input.content, streaming: true, revision: ++this.revision, importsRevision: this.sources.get(rel)?.importsRevision });
     } catch { /* Partial JSON and paths are expected while the native tool input is streaming. */ }
   }
   async finish() {
@@ -123,8 +151,9 @@ export class ArtifactObserver {
     // already queued watcher can emit after finish and reopen a supposedly settled artifact.
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
+    for (const toolCallId of this.drafts.keys()) this.settle(toolCallId);
     await this.refresh();
     this.closed = true;
   }
-  async close() { this.closed = true; for (const watcher of this.watchers) watcher.close(); this.watchers = []; await this.scanning?.catch(() => {}); }
+  async close() { this.closed = true; for (const watcher of this.watchers) watcher.close(); this.watchers = []; this.drafts.clear(); this.inputs.clear(); this.names.clear(); await this.scanning?.catch(() => {}); }
 }

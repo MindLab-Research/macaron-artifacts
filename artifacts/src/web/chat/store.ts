@@ -38,6 +38,7 @@ export class WorkspaceStore {
   private turns = new Map<string, number>();
   private configurationRevisions = new Map<string, number>();
   private selectedArtifacts = new Map<string, string>();
+  private seenArtifactStreams = new Map<string, Set<string>>();
   private dismissed = new Map<string, string>();
   private disposed = false;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -133,9 +134,15 @@ export class WorkspaceStore {
       const current = revisions.get(part.data.path);
       if (current !== undefined && current > part.data.revision) return;
       revisions.set(part.data.path, part.data.revision);
+      const startedStreaming = part.data.streaming && !files.get(part.data.path)?.streaming;
       files.set(part.data.path, part.data);
-      // A new file opens the panel. Closing the panel during its stream remains respected.
-      if (!this.selectedArtifacts.has(id) && this.dismissed.get(id) !== part.data.path) this.selectedArtifacts.set(id, part.data.path);
+      let seen = this.seenArtifactStreams.get(id);
+      if (!seen) this.seenArtifactStreams.set(id, seen = new Set());
+      const stream = `${part.data.path}:${part.data.revision}`, newStream = startedStreaming && !seen.has(stream);
+      if (startedStreaming) seen.add(stream);
+      // Follow a write's first partial frame, even with another canvas open; subsequent deltas must not undo manual navigation.
+      // Reconnecting replays the same journal, so an already seen start must not take focus again.
+      if ((newStream || !this.selectedArtifacts.has(id) && !this.dismissed.has(id)) && this.dismissed.get(id) !== part.data.path) this.selectedArtifacts.set(id, part.data.path);
       this.publish();
     }
     if (part.type === 'data-recap') this.update(id, { ...(part.data.title ? { title: part.data.title } : {}), suggestions: part.data.suggestions });
@@ -194,7 +201,7 @@ export class WorkspaceStore {
   remove = async (id: string) => {
     await api(`/api/sessions/${id}`, { method: 'DELETE' });
     this.cancelMetadata(id); this.turns.delete(id); this.configurationRevisions.delete(id); this.setDraft(id, '');
-    this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.dismissed.delete(id);
+    this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.seenArtifactStreams.delete(id); this.dismissed.delete(id);
     const sessions = this.snapshot.sessions.filter(session => session.id !== id);
     this.publish({ sessions, activeId: this.snapshot.activeId === id ? sessions[0]?.id ?? null : this.snapshot.activeId });
     if (this.snapshot.activeId) await this.select(this.snapshot.activeId);
@@ -220,6 +227,7 @@ export class WorkspaceStore {
     const turn = (this.turns.get(id) ?? 0) + 1;
     this.turns.set(id, turn);
     this.liveRevisions.delete(id);
+    this.seenArtifactStreams.delete(id);
     this.dismissed.delete(id);
     this.update(id, { status: 'running', suggestions: [], error: undefined });
     try { chat.clearError(); await chat.sendMessage({ text: item.text }); }
@@ -253,13 +261,14 @@ export class WorkspaceStore {
         if (remote.status === 'running') throw new Error('这个会话仍有一轮正在生成，请稍后重试。');
         this.update(id, { status: 'running', suggestions: [], error: undefined });
         chat.clearError();
+        this.seenArtifactStreams.delete(id);
         // No argument replays the same message id and intent; appending "continue" would lose a request the server never received.
         await chat.sendMessage();
       } else if (remote.status === 'running') {
         chat.clearError(); await chat.resumeStream(); await this.refresh(id, turn, true);
       } else {
         chat.messages = remote.messages; chat.clearError();
-        if (remote.status === 'error') { this.update(id, { status: 'running', suggestions: [], error: undefined }); await chat.sendMessage(); }
+        if (remote.status === 'error') { this.seenArtifactStreams.delete(id); this.update(id, { status: 'running', suggestions: [], error: undefined }); await chat.sendMessage(); }
         else { const { messages: _messages, ...summary } = remote; this.update(id, summary); void this.subscribeMetadata(id); }
       }
     } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }

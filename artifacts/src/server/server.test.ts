@@ -419,6 +419,109 @@ test('native identity is checkpointed before exposing a recoverable partial answ
   await post(`/api/sessions/${session.id}/stop`, {}); await response.text();
 });
 
+test('artifact scans preserve an active write while unrelated modules change', async () => {
+  const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
+  cleanups.push(() => observer.close());
+  const path = '.artifacts/canvases/example.ui4a.tsx', previous = 'export default () => <p>Previous</p>';
+  await writeUi4aFile(cwd, path, previous); await observer.start();
+  observer.accept({ type: 'tool-input-start', toolCallId: 'write', toolName: 'Write' });
+  observer.accept({ type: 'tool-input-delta', toolCallId: 'write', inputTextDelta: '{"file_path":"' + path + '","content":"export default () => <p>New' });
+  const latest = () => chunks.filter(chunk => chunk.type === 'data-artifact').findLast(chunk => chunk.data.path === path)?.data;
+  expect(latest()).toMatchObject({ source: 'export default () => <p>New', streaming: true });
+  const draftRevision = latest()!.revision, initialImportsRevision = latest()!.importsRevision!;
+  expect(initialImportsRevision).toBeLessThan(draftRevision);
+  await writeUi4aFile(cwd, '.artifacts/components/child.tsx', 'export const Label = () => <b>Child</b>'); await observer.refresh();
+  expect(latest()).toMatchObject({ source: 'export default () => <p>New', streaming: true });
+  expect(latest()!.revision).toBeGreaterThan(draftRevision);
+  expect(latest()!.importsRevision).toBeGreaterThan(initialImportsRevision);
+  await writeUi4aFile(cwd, path, ''); await observer.refresh();
+  expect(latest()).toMatchObject({ source: 'export default () => <p>New', streaming: true });
+  const importsRevision = latest()!.importsRevision, sourceRevision = latest()!.revision;
+  observer.accept({ type: 'tool-input-delta', toolCallId: 'write', inputTextDelta: ' report</p>"}' });
+  expect(latest()!.revision).toBeGreaterThan(sourceRevision);
+  expect(latest()!.importsRevision).toBe(importsRevision);
+  observer.accept({ type: 'tool-input-available', toolCallId: 'write', toolName: 'Write', input: { file_path: path, content: 'export default () => <p>New report</p>' } });
+  await observer.refresh(); expect(latest()?.streaming).toBe(true);
+  await writeUi4aFile(cwd, path, 'export default () => <p>New report</p>');
+  observer.accept({ type: 'tool-output-available', toolCallId: 'write', output: 'written' });
+  await observer.refresh(); expect(latest()).toMatchObject({ source: 'export default () => <p>New report</p>', streaming: false });
+});
+
+test('complete tool input opens a first canvas before execution without simulated deltas', async () => {
+  const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
+  cleanups.push(() => observer.close());
+  const path = '.artifacts/canvases/first.ui4a.tsx', source = 'export default () => <p>First</p>';
+  observer.accept({ type: 'tool-input-available', toolCallId: 'write', toolName: 'write', input: { filePath: join(cwd, path), content: source } });
+  expect(chunks).toHaveLength(1); expect(chunks[0]).toMatchObject({ type: 'data-artifact', data: { path, source, streaming: true } });
+  observer.accept({ type: 'tool-output-available', toolCallId: 'write', preliminary: true, output: 'working' });
+  await observer.refresh(); expect(chunks.at(-1)).toMatchObject({ type: 'data-artifact', data: { source, streaming: true } });
+  await writeUi4aFile(cwd, path, source);
+  observer.accept({ type: 'tool-output-available', toolCallId: 'write', output: 'written' });
+  await observer.refresh(); expect(chunks.at(-1)).toMatchObject({ type: 'data-artifact', data: { path, source, streaming: false } });
+});
+
+test('a child refresh finishing after a source delta invalidates imports without rolling back the draft', async () => {
+  const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
+  cleanups.push(() => observer.close());
+  const path = '.artifacts/example.tsx';
+  await writeUi4aFile(cwd, path, 'export default () => null'); await observer.refresh();
+  observer.accept({ type: 'tool-input-start', toolCallId: 'write', toolName: 'Write' });
+  observer.accept({ type: 'tool-input-delta', toolCallId: 'write', inputTextDelta: '{"path":"' + path + '","content":"export default () => <p>New' });
+  const latest = () => chunks.filter(chunk => chunk.type === 'data-artifact').at(-1)!.data;
+  const importsRevision = latest().importsRevision!;
+  await writeUi4aFile(cwd, '.artifacts/components/child.tsx', 'export default 2');
+  const refresh = observer.refresh();
+  observer.accept({ type: 'tool-input-delta', toolCallId: 'write', inputTextDelta: ' report' });
+  const sourceRevision = latest().revision;
+  expect(latest().importsRevision).toBe(importsRevision);
+  await refresh;
+  expect(latest()).toMatchObject({ source: 'export default () => <p>New report', streaming: true });
+  expect(latest().revision).toBeGreaterThan(sourceRevision);
+  expect(latest().importsRevision).toBeGreaterThan(importsRevision);
+});
+
+for (const terminal of [
+  { type: 'tool-input-error', toolCallId: 'write', toolName: 'Write', input: {}, errorText: 'Incomplete input' },
+  { type: 'tool-output-error', toolCallId: 'write', errorText: 'Write failed' },
+  { type: 'tool-output-denied', toolCallId: 'write' },
+] satisfies ChatChunk[]) test(`artifact ${terminal.type} restores the existing file and settles an unwritten preview`, async () => {
+  const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
+  cleanups.push(() => observer.close());
+  const path = '.artifacts/example.tsx', original = 'export default () => <p>Original</p>', draft = 'export default () => <p>Draft';
+  await writeUi4aFile(cwd, path, original); await observer.refresh();
+  observer.accept({ type: 'tool-input-available', toolCallId: 'write', toolName: 'Write', input: { path, content: draft } });
+  const oldScan = observer.refresh(); observer.accept(terminal); await oldScan; await observer.refresh();
+  expect(chunks.at(-1)).toMatchObject({ type: 'data-artifact', data: { source: original, streaming: false } });
+  observer.accept({ type: 'tool-input-available', toolCallId: 'write', toolName: 'Write', input: { path: '.artifacts/new.tsx', content: draft } });
+  observer.accept(terminal); await observer.refresh();
+  expect(chunks.filter(chunk => chunk.type === 'data-artifact' && chunk.data.path === '.artifacts/new.tsx').at(-1)).toMatchObject({ type: 'data-artifact', data: { source: draft, streaming: false } });
+});
+
+test('artifact finish settles drafts even when the harness omits tool results and ignores later input', async () => {
+  const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
+  cleanups.push(() => observer.close());
+  const path = '.artifacts/example.tsx', original = 'export default () => <p>Original</p>';
+  await writeUi4aFile(cwd, path, original);
+  observer.accept({ type: 'tool-input-available', toolCallId: 'write', toolName: 'Write', input: { path, content: 'partial' } });
+  observer.accept({ type: 'tool-input-available', toolCallId: 'new', toolName: 'Write', input: { path: '.artifacts/new.tsx', content: 'new partial' } });
+  await observer.finish();
+  const artifacts = chunks.filter(chunk => chunk.type === 'data-artifact');
+  expect(artifacts.findLast(chunk => chunk.data.path === path)?.data).toMatchObject({ source: original, streaming: false });
+  expect(artifacts.findLast(chunk => chunk.data.path === '.artifacts/new.tsx')?.data).toMatchObject({ source: 'new partial', streaming: false });
+  const count = chunks.length;
+  observer.accept({ type: 'tool-input-available', toolCallId: 'late', toolName: 'Write', input: { path, content: 'late' } });
+  await observer.refresh(); expect(chunks).toHaveLength(count);
+});
+
+test('artifact input ignores edits, other tools and paths outside the entrypoint directory', async () => {
+  const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
+  cleanups.push(() => observer.close());
+  for (const [toolName, path] of [['Edit', '.artifacts/example.tsx'], ['Read', '.artifacts/example.tsx'], ['Write', '../outside.tsx'], ['Write', '.artifacts/components/child.tsx']]) {
+    observer.accept({ type: 'tool-input-available', toolCallId: 'ignored', toolName, input: { path, content: 'not a preview' } });
+  }
+  expect(chunks).toEqual([]);
+});
+
 test('the final artifact scan settles before close and emits nothing after closure', async () => {
   const cwd = await workspace(), chunks: ChatChunk[] = [], observer = new ArtifactObserver(cwd, chunk => chunks.push(chunk));
   await observer.start(); await writeUi4aFile(cwd, '.artifacts/example.tsx', 'export default () => <p>Complete</p>');

@@ -226,6 +226,86 @@ describe('persistent session chat connections', () => {
     expect(store.artifacts('first')).toEqual([{ path, source: 'FINAL NEW', streaming: false, revision: 1101 }]);
   });
 
+  test('a canvas write selects its first partial frame without stealing later manual navigation', async () => {
+    const first = { ...session('first'), status: 'running' as const }, old = '.artifacts/old.ui4a.tsx', next = '.artifacts/next.ui4a.tsx';
+    let turn!: ReadableStreamDefaultController<Uint8Array>;
+    globalThis.fetch = (async input => {
+      const path = String(input);
+      if (path === '/api/harnesses') return Response.json([]);
+      if (path === '/api/sessions') return Response.json([first]);
+      if (path.endsWith('/artifacts')) return Response.json([{ path: old, source: 'OLD', streaming: false, revision: 1 }]);
+      if (path.endsWith('/stream')) return new Response(new ReadableStream({ start(controller) { turn = controller; } }), { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } });
+      if (path.endsWith('/metadata')) return new Response('');
+      return Response.json(first);
+    }) as typeof fetch;
+    const store = new WorkspaceStore(); await store.initialize(); await tick();
+    const emit = async (chunk: ChatChunk) => { turn.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`)); await tick(); };
+    const artifact = (path: string, source: string, revision: number, streaming = true): ChatChunk => ({ type: 'data-artifact', id: path, data: { path, source, revision, streaming } });
+    try {
+      await emit({ type: 'start', messageId: 'answer' }); store.openArtifact('first', old);
+      await emit(artifact(next, 'export default function App(){ return <p>First', 2));
+      expect(store.selectedArtifact('first')).toBe(next);
+      expect(store.artifacts('first').find(file => file.path === next)?.streaming).toBe(true);
+      store.openArtifact('first', old);
+      await emit(artifact(next, 'export default function App(){ return <p>First section', 3));
+      expect(store.selectedArtifact('first')).toBe(old);
+      store.openArtifact('first', next); store.closeArtifact('first');
+      await emit(artifact(next, 'export default function App(){ return <p>First section</p> }', 4));
+      expect(store.selectedArtifact('first')).toBeUndefined();
+      await emit(artifact(next, 'export default function App(){ return <p>First section</p> }', 5, false));
+      expect(store.selectedArtifact('first')).toBeUndefined();
+      store.openArtifact('first', next);
+      await emit(artifact(old, 'export default function App(){ return <p>Updating existing', 6));
+      expect(store.selectedArtifact('first')).toBe(old);
+      await emit(artifact(next, 'stale', 4));
+      expect(store.selectedArtifact('first')).toBe(old);
+      await emit(artifact(next, 'disk refresh', 7, false));
+      expect(store.selectedArtifact('first')).toBe(old);
+    } finally { store.dispose(); turn.close(); await tick(); }
+  });
+
+  for (const navigation of ['select another canvas', 'close the panel'] as const) test(`replaying a canvas write after disconnect preserves ${navigation} and the next turn can still open it`, async () => {
+    const first = session('first'), old = '.artifacts/old.ui4a.tsx', next = '.artifacts/next.ui4a.tsx';
+    first.status = 'running';
+    const turns: ReadableStreamDefaultController<Uint8Array>[] = [], encoder = new TextEncoder();
+    globalThis.fetch = (async (input, init) => {
+      const route = String(input);
+      if (route === '/api/harnesses') return Response.json([]);
+      if (route === '/api/sessions') return Response.json([first]);
+      if (route.endsWith('/artifacts')) return Response.json([{ path: old, source: 'OLD', streaming: false, revision: 5000 }, { path: next, source: 'DISK', streaming: false, revision: 5000 }]);
+      if (route.endsWith('/metadata')) return new Response('');
+      if (route === '/api/chat' || route.endsWith('/stream')) {
+        if (route === '/api/chat') first.messages = JSON.parse(String(init?.body)).messages;
+        return new Response(new ReadableStream({ start(controller) { turns.push(controller); } }), { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } });
+      }
+      return Response.json(first);
+    }) as typeof fetch;
+    const store = new WorkspaceStore(); await store.initialize(); await tick();
+    const emit = async (chunk: ChatChunk) => { turns.at(-1)!.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`)); await tick(); };
+    const artifact = (revision: number, streaming: boolean): ChatChunk => ({ type: 'data-artifact', id: next, data: { path: next, source: `SOURCE ${revision}`, revision, streaming } });
+    const journal: ChatChunk[] = [{ type: 'start', messageId: 'answer' }, artifact(100, false), artifact(101, true), artifact(102, true)];
+    let resume: Promise<void> | undefined;
+    try {
+      for (const chunk of journal) await emit(chunk);
+      expect(store.selectedArtifact('first')).toBe(next);
+      navigation === 'close the panel' ? store.closeArtifact('first') : store.openArtifact('first', old);
+      const selected = store.selectedArtifact('first');
+      turns[0].error(new TypeError('network disconnected')); await tick(); await tick();
+      resume = store.resume('first'); await tick();
+      expect(turns).toHaveLength(2);
+      // The real server replays its whole journal, including disk frames older than the last partial update.
+      for (const chunk of journal) { await emit(chunk); expect(store.selectedArtifact('first')).toBe(selected); }
+      await emit(artifact(103, false)); first.status = 'idle'; await emit({ type: 'finish' }); turns[1].close(); await resume;
+      store.openArtifact('first', old); store.send('first', 'Update that canvas again'); await tick();
+      expect(turns).toHaveLength(3);
+      await emit({ type: 'start', messageId: 'next-answer' });
+      // A new turn owns a fresh revision counter; an identical stream-start key is not a reconnect.
+      await emit(artifact(100, false)); await emit(artifact(101, true));
+      expect(store.selectedArtifact('first')).toBe(next);
+      await emit(artifact(102, false)); await emit({ type: 'finish' }); turns[2].close(); await tick();
+    } finally { store.dispose(); for (const turn of turns) { try { turn.close(); } catch { /* Disconnected or completed streams are already closed. */ } } await resume; await tick(); }
+  });
+
   test('an old finish refresh cannot restore suggestions over a newer active turn', async () => {
     const first = session('first');
     const turns: ReadableStreamDefaultController<Uint8Array>[] = [];

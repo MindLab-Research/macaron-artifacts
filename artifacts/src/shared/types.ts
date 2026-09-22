@@ -3,7 +3,8 @@ import type { QuestionState } from './questions.js';
 
 export type HarnessId = 'claude-code' | 'codex' | 'opencode' | 'opencode-v2' | 'pi' | 'hermes' | 'openclaw';
 export interface HarnessInfo { id: HarnessId; name: string; available: boolean; detail?: string; capabilities: { textDeltas: boolean; reasoningDeltas: boolean; toolInputDeltas: boolean; commandOutputDeltas: boolean; approvals: boolean; fork: boolean } }
-export interface Artifact { path: string; source: string; streaming: boolean; revision: number }
+// Import graphs follow disk snapshots, independently of each streamed source revision.
+export interface Artifact { path: string; source: string; streaming: boolean; revision: number; importsRevision?: number }
 export interface Approval { id: string; tool: string; input: unknown }
 export type MessageData = { artifact: Artifact; command: { toolCallId: string; output: string }; approval: Approval & { resolved?: boolean }; question: QuestionState; usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }; recap: { title?: string; suggestions: string[] } };
 export type ChatMessage = UIMessage<{ interrupted?: boolean }, MessageData>;
