@@ -39,7 +39,8 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const queued = store.queue(session.id);
   return <div className="@container relative flex h-full min-w-0 flex-1 flex-col">
     <div ref={viewport} data-chat-column className="min-h-0 flex-1 overflow-y-auto"><div ref={content} data-chat-content className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
-      {chat.messages.map(message => <Message key={message.id} message={message} streaming={streaming && message.id === last?.id} active={session.status === 'running'} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} onAnswer={answer} onConnectionCommand={commandConnection} />)}
+      {/* While submitted, the last message is still the complete user prompt; only assistant text can stream. */}
+      {chat.messages.map(message => <Message key={message.id} message={message} streaming={message.role === 'assistant' && streaming && message.id === last?.id} active={session.status === 'running'} cwd={session.cwd} sessionId={session.id} onSend={send} onArtifact={openArtifact} onApprove={approve} onAnswer={answer} onConnectionCommand={commandConnection} />)}
       {waiting ? <LoadingState label={chat.status === 'submitted' ? '正在连接…' : '正在生成…'} /> : null}
       {!session.providerReview && (chat.error || session.status === 'error') ? <div role="alert" className="flex items-center gap-3 rounded-xl border border-danger/40 px-3 py-2 text-xs text-danger"><span className="min-w-0 flex-1 break-words">{chat.error?.message ?? session.error ?? '这轮没有跑完'}</span><Button data-export-control size="sm" variant="ghost" onClick={() => void store.retry(session.id)}>重试</Button></div> : null}
     </div></div>
