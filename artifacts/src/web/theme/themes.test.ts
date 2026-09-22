@@ -50,8 +50,10 @@ test('real TSX tokens stay readable in every theme without changing cached theme
       const original = await loadTheme(id), snapshot = structuredClone(original), palette = themePalette(original, original.type === 'dark');
       // A separate engine proves the production highlighter changes only insufficient syntax contrast.
       await baseline.loadTheme(structuredClone(original));
-      const native = baseline.codeToTokens(source, { lang: 'tsx', theme: id });
-      const rendered = (await highlighter('tsx', id)).codeToTokens(source, { lang: 'tsx', theme: id });
+      // This fixed, tiny fixture compares colors, not the tokenizer's wall-clock fallback.
+      // A cold grammar can exceed Shiki's default 500 ms and return partial tokens.
+      const native = baseline.codeToTokens(source, { lang: 'tsx', theme: id, tokenizeTimeLimit: 0 });
+      const rendered = (await highlighter('tsx', id)).codeToTokens(source, { lang: 'tsx', theme: id, tokenizeTimeLimit: 0 });
       const characters = (tokens: typeof native.tokens, fallback: string) => tokens.flat().flatMap(token => [...token.content].map(text => ({ text, color: (token.color ?? fallback).toLowerCase(), style: token.fontStyle ?? 0 })));
       const before = characters(native.tokens, native.fg ?? palette['code-fg']), after = characters(rendered.tokens, rendered.fg ?? palette['code-fg']);
       expect(after.map(token => token.text).join(''), id).toBe(before.map(token => token.text).join(''));

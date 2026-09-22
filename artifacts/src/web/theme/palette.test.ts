@@ -183,9 +183,10 @@ test('bright danger text remains separate from the readable destructive button f
   readablePair(palette, 'danger-bg', 'danger-fg');
 });
 
-test('mixed or absent tokens cannot bypass readability within their actual role', () => {
-  const values = [undefined, 'invalid', 'transparent', '#0000', '#fff8', '#777', '#888', '#000', '#fff'];
-  for (const background of values) for (const foreground of values) for (const secondary of values) {
+const mixedTokens = [undefined, 'invalid', 'transparent', '#0000', '#fff8', '#777', '#888', '#000', '#fff'];
+// Keep every combination, but give independent background cases their own test budget.
+test.each(mixedTokens)('mixed tokens remain readable with background %s', background => {
+  for (const foreground of mixedTokens) for (const secondary of mixedTokens) {
     const palette = themePalette({ colors: { 'editor.background': background!, 'editor.foreground': foreground!, 'editorWidget.background': secondary!, 'list.hoverBackground': foreground!, 'button.foreground': foreground!, 'button.background': background! } }, false);
     readableRoles(palette);
   }
