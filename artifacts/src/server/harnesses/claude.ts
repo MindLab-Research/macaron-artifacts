@@ -2,7 +2,7 @@ import type { Options, Query } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatChunk } from '../../shared/types.js';
 import { nativeQuestions } from './questions.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
-import { abortable, abortError, executableVersion, record, safeError, safeProfileError, string } from './common.js';
+import { abortable, abortError, record, safeError, safeProfileError, string } from './common.js';
 import { claudeProfileOptions, prepareClaudeProfile, type PreparedClaudeProfile } from './claude-profile.js';
 
 type Block = { id: string; kind: 'text' | 'reasoning' | 'tool'; name: string; json: string; input: unknown; ended: boolean };
@@ -168,8 +168,8 @@ export const claudeAdapter: HarnessAdapter = {
   id: 'claude-code',
   profileOptions: claudeProfileOptions,
   async info() {
-    const version = await executableVersion(process.env.MACARON_CLAUDE_PATH || 'claude');
-    return { id: 'claude-code', name: 'Claude Code', available: Boolean(version), detail: version || 'Install Claude Code', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: false, approvals: true, fork: true } };
+    const { claudeRuntimeInfo } = await import('./claude-availability.js');
+    return claudeRuntimeInfo();
   },
   run: runClaudeTurn,
 };

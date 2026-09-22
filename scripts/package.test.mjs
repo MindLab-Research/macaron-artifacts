@@ -134,7 +134,7 @@ test('the single published package installs in isolation and serves seven harnes
   // SDK. Creating app sessions below does not start a native turn or call a provider.
   const cli = join(temporary, 'native-version-stub');
   await writeFile(cli, `#!${process.execPath}\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(91);\nconsole.log('package-smoke-native 1.0.0');\n`, { mode: 0o755 });
-  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_HERMES_PATH = cli; env.MACARON_OPENCLAW_PATH = cli;
+  env.MACARON_CLAUDE_PATH = cli; env.MACARON_CODEX_PATH = cli; env.MACARON_HERMES_PATH = cli;
   for (const major of [1, 2]) {
     const path = join(temporary, `opencode-v${major}-version-stub`);
     await writeFile(path, `#!${process.execPath}\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(91);\nconsole.log('${major === 1 ? '1.18.29' : 'opencode v2.0.13'}');\n`, { mode: 0o755 });
@@ -146,11 +146,19 @@ test('the single published package installs in isolation and serves seven harnes
   assert.deepEqual(await (await fetch(`${app.base}/api/auth`)).json(), { enabled: false, authenticated: true });
   const harnesses = await (await fetch(`${app.base}/api/harnesses`)).json();
   assert.deepEqual(harnesses.map(item => item.id).sort(), ['claude-code', 'codex', 'hermes', 'openclaw', 'opencode', 'opencode-v2', 'pi']);
+  const expectedHarness = {
+    pi: { source: 'bundled-sdk', detail: /^内置 Pi SDK \S+，无需单独安装 pi CLI$/ },
+    openclaw: { source: 'gateway', detail: '内置 Gateway Client，无需本机 CLI；需要外部 Gateway，连接和认证尚未检查' },
+    opencode: { source: 'native-cli', name: 'OpenCode v1', detail: /^1\.18\.29$/ },
+    'opencode-v2': { source: 'native-cli', name: 'OpenCode v2', detail: /^opencode v2\.0\.13$/ },
+  };
   for (const harness of harnesses) {
     assert.equal(harness.available, true, `${harness.id} must be available from its CLI stub or bundled SDK`);
-    assert.match(harness.detail, harness.id === 'pi' ? /^pi SDK \S+/ : harness.id === 'opencode' ? /^1\.18\.29$/ : harness.id === 'opencode-v2' ? /^opencode v2\.0\.13$/ : /package-smoke-native/);
-    if (harness.id === 'opencode') assert.equal(harness.name, 'OpenCode v1');
-    if (harness.id === 'opencode-v2') assert.equal(harness.name, 'OpenCode v2');
+    const expected = expectedHarness[harness.id] ?? { source: 'native-cli', detail: /package-smoke-native/ };
+    assert.equal(harness.source, expected.source);
+    if (expected.name) assert.equal(harness.name, expected.name);
+    if (expected.detail instanceof RegExp) assert.match(harness.detail, expected.detail);
+    else assert.equal(harness.detail, expected.detail);
     const response = await fetch(`${app.base}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ harness: harness.id, cwd: consumer }) });
     assert.equal(response.status, 201);
     assert.equal((await response.json()).harness, harness.id);

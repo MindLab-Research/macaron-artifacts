@@ -55,13 +55,17 @@ async function fixture(mode = '') {
     },
   } });
   cleanup.push(async () => { await closeHermesConnections(); gateway.stop(true); });
-  const adapter = { ...hermesAdapter, run: (turn: Parameters<typeof hermesAdapter.run>[0]) => hermesAdapter.run({ ...turn, profile: { config: { gatewayUrl: `ws://127.0.0.1:${gateway.port}`, nativeProfile: 'test-profile' } } }) };
-  const app = await createArtifactsServer({ directory: join(cwd, 'data'), instructions: '', harnesses: { hermes: adapter } });
+  const app = await createArtifactsServer({ directory: join(cwd, 'data'), instructions: '', harnesses: { hermes: hermesAdapter } });
   await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
   cleanup.push(() => app.close());
   const base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const post = (path: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
-  const session = await (await post('/api/sessions', { cwd, harness: 'hermes' })).json() as Session;
+  const profileResponse = await post('/api/profiles', { harness: 'hermes', name: 'Test gateway', config: { gatewayUrl: `ws://127.0.0.1:${gateway.port}`, nativeProfile: 'test-profile' } });
+  expect(profileResponse.status).toBe(201);
+  const profile = await profileResponse.json() as { id: string };
+  const sessionResponse = await post('/api/sessions', { cwd, harness: 'hermes', profileId: profile.id });
+  expect(sessionResponse.status).toBe(201);
+  const session = await sessionResponse.json() as Session;
   if (['resume', 'early'].includes(mode) || mode.startsWith('retry-pending')) {
     session.nativeId = encodeHermesNativeId({ sessionId: 'old-native', storedId: 'stored', profile: 'test-profile', ...(mode === 'retry-pending-known' ? { submittedMessageId: 'user' } : mode === 'retry-pending-unsent' ? { submittedMessageId: 'older-user' } : {}) });
     if (mode.startsWith('retry-pending')) { session.status = 'error'; session.messages = [{ id: 'user', role: 'user', parts: [{ type: 'text', text: 'connect' }] }]; }

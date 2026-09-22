@@ -34,7 +34,15 @@ pnpm start
 
 Run these commands from the repository root. `MACARON_PORT` and `WEB_PORT` override the ports. Production serves the UI and API together.
 
-Install and authenticate the native CLI for Claude Code, Codex, or OpenCode. `MACARON_CLAUDE_PATH`, `MACARON_CODEX_PATH`, and `MACARON_OPENCODE_PATH` can select each executable. The bundled pi SDK uses local `~/.pi/agent` configuration; `PI_CODING_AGENT_DIR` overrides that directory, and no pi executable is required. An empty model field uses the harness default. OpenCode and pi accept an optional `provider/model` override.
+The picker checks the runtime each adapter actually uses, not whether every harness has a command on PATH:
+
+- **Claude Code** uses the bundled SDK and its optional platform binary by default. Keep optional dependencies enabled. `MACARON_CLAUDE_PATH` selects an authoritative CLI or script override; a broken override does not fall back to the bundled binary.
+- **pi** uses the bundled SDK; no separate `pi` CLI is required. It uses local `~/.pi/agent` configuration, or `PI_CODING_AGENT_DIR`.
+- **Codex / OpenCode** require external CLIs. `MACARON_CODEX_PATH` and `MACARON_OPENCODE_PATH` override the executables.
+- **Hermes** uses an external CLI (`MACARON_HERMES_PATH` or `hermes`) unless a Profile's Gateway URL or `MACARON_HERMES_URL` selects an external gateway. A saved gateway Profile can be used without a local CLI.
+- **OpenClaw** uses the bundled Gateway Client and an external gateway, not a local `openclaw` command. Configure the Profile or `OPENCLAW_GATEWAY_URL` (default `ws://127.0.0.1:18789`).
+
+Runtime availability does **not** check model credentials or gateway connectivity. No model requests or gateway handshakes are made by the availability checks. Session creation rechecks the selected runtime/Profile before saving. An empty model field uses the harness default; OpenCode and pi accept an optional `provider/model` override.
 
 App conversations live in `~/.macaron-artifacts/sessions`; `MACARON_DATA_DIR` overrides that directory. Workspace files remain in the directory selected for each session. Deleting an app conversation does not delete workspace files.
 

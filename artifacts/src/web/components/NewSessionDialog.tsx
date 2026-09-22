@@ -22,14 +22,14 @@ export function NewSessionDialog({ harnesses, initialHarness, initialCwd, onClos
         <Label className="text-xs font-medium text-muted">Harness</Label>
         <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
           {harnesses.map(item => <HeadlessField key={item.id} disabled={busy || !item.available} className="min-w-0">
-            <Radio as="button" type="button" value={item.id} title={item.available ? item.name : `${item.name} · 未安装`} className="interactive flex h-16 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-control-border px-1 text-xs leading-4 text-fg [&:not([data-checked]):not([data-disabled]):hover]:bg-surface-3 [&:not([data-checked]):not([data-disabled]):hover]:text-hover-fg data-[checked]:border-accent data-[checked]:bg-accent data-[checked]:font-semibold data-[checked]:text-accent-fg data-[checked]:hover:bg-accent-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+            <Radio as="button" type="button" value={item.id} title={item.available ? (item.detail || item.name) : `${item.name}: ${item.detail || '不可用'}`} className="interactive flex h-16 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-control-border px-1 text-xs leading-4 text-fg [&:not([data-checked]):not([data-disabled]):hover]:bg-surface-3 [&:not([data-checked]):not([data-disabled]):hover]:text-hover-fg data-[checked]:border-accent data-[checked]:bg-accent data-[checked]:font-semibold data-[checked]:text-accent-fg data-[checked]:hover:bg-accent-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
               <HarnessIcon harness={item.id} />
               <Label as="span" passive>{item.name}</Label>
-              {!item.available ? <Description className="text-[10px] leading-3">未安装</Description> : null}
+              {!item.available ? <Description className="text-[10px] leading-3">不可用</Description> : item.source ? <Description className="text-[10px] leading-3">{({ 'bundled-sdk': 'SDK', 'native-cli': 'CLI', gateway: 'Gateway', script: '脚本' } as const)[item.source]}</Description> : null}
             </Radio>
           </HeadlessField>)}
         </div>
-        <Description aria-live="polite" className="min-h-4 text-xs leading-4 text-muted [overflow-wrap:anywhere]">{info?.detail ?? (info ? '' : '没有可用的 Harness')}</Description>
+        <Description aria-live="polite" className="min-h-4 text-xs leading-4 text-muted [overflow-wrap:anywhere]">{info?.detail ?? (info ? '' : '没有可用的 Harness')}{info?.available ? ' · 运行时可用不代表模型或网关已就绪' : ''}</Description>
       </RadioGroup>
       <Field autoFocus name="cwd" label="工作区" disabled={busy} value={cwd} onChange={event => setCwd(event.target.value)} placeholder="/path/to/project" required />
       <SessionProfileFields harness={harness} cwd={cwd} profileId={profileId} model={model} onProfile={id => { setProfileId(id); setModel(''); }} onModel={setModel} onManage={() => setProfilesOpen(true)} disabled={busy} />

@@ -345,8 +345,11 @@ export const piAdapter: HarnessAdapter = {
   id: 'pi',
   async info() {
     let version: string | undefined;
-    try { version = (await import('@earendil-works/pi-coding-agent')).VERSION; } catch { /* Optional harness dependency may be unavailable. */ }
-    return { id: 'pi', name: 'pi', available: Boolean(version), detail: version ? `pi SDK ${version}` : 'Install the Pi coding-agent SDK', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } };
+    try {
+      const sdk = await import('@earendil-works/pi-coding-agent');
+      if (typeof sdk.createAgentSession === 'function' && typeof sdk.SessionManager?.inMemory === 'function') version = sdk.VERSION;
+    } catch { /* Missing or broken bundled SDK. */ }
+    return { id: 'pi', name: 'pi', available: Boolean(version), source: 'bundled-sdk', detail: version ? `内置 Pi SDK ${version}，无需单独安装 pi CLI` : 'Pi SDK 不可用，请重新安装 Artifacts', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } };
   },
   async profileOptions(_cwd, profile) { return piProfileOptions(profile); },
   run: runPiSession,

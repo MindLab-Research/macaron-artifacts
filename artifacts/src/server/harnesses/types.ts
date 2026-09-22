@@ -50,7 +50,8 @@ export interface HarnessTurn {
 }
 export interface HarnessAdapter {
   id: HarnessId;
-  info(): Promise<HarnessInfo>;
+  /** Runtime prerequisites only; does not authenticate models or connect to gateways. */
+  info(profile?: ResolvedProfile): Promise<HarnessInfo>;
   profileOptions?(cwd: string, profile?: ResolvedProfile): Promise<ProfileOptions>;
   // Adapters emit content parts only; session orchestration owns start/finish and persistence.
   run(turn: HarnessTurn): AsyncIterable<ChatChunk>;

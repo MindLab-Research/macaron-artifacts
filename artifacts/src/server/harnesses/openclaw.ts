@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { ChatChunk, HarnessInfo } from '../../shared/types.js';
 import type { ProfileOptions } from '../../shared/profiles.js';
-import type { HarnessAdapter, HarnessTurn } from './types.js';
-import { abortError, EventQueue, executableVersion, record, safeError, string } from './common.js';
+import type { HarnessAdapter, HarnessTurn, ResolvedProfile } from './types.js';
+import { abortError, EventQueue, record, safeError, string } from './common.js';
 
 type GatewayClient = import('@openclaw/gateway-client').GatewayClient;
 type GatewayOptions = import('@openclaw/gateway-client').GatewayClientOptions;
@@ -10,7 +10,6 @@ type GatewayEvent = { event: string; payload?: unknown };
 type NativeSession = { key: string; id?: string; cwd: string };
 type StreamState = { text: string; thought: string; textId: string; thoughtId: string; tools: Set<string> };
 
-const OPENCLAW = () => process.env.MACARON_OPENCLAW_PATH || 'openclaw';
 const decode = (value: string | undefined, cwd: string): NativeSession | undefined => {
   if (!value) return;
   try { const decoded = JSON.parse(Buffer.from(value.startsWith('openclaw:') ? value.slice('openclaw:'.length) : value, 'base64url').toString('utf8')); if (decoded.key) return { key: String(decoded.key), id: decoded.id ? String(decoded.id) : undefined, cwd: String(decoded.cwd || cwd) }; } catch { /* Old sessions stored the Gateway key directly. */ }
@@ -26,8 +25,10 @@ export const decodeOpenClawNativeId = decode;
 const METADATA_PLUGIN_ID = 'macaron-artifacts-metadata-gate';
 const METADATA_SESSION_PREFIX = 'macaron-metadata:';
 
+const gatewayUrl = (profile?: ResolvedProfile) => profile?.config.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789';
+
 function options(turn: HarnessTurn, onEvent: (event: GatewayEvent) => void, onError: (error: Error) => void): GatewayOptions {
-  const profile = turn.profile, url = profile?.config.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789', token = profile?.authToken || process.env.OPENCLAW_GATEWAY_TOKEN;
+  const profile = turn.profile, url = gatewayUrl(profile), token = profile?.authToken || process.env.OPENCLAW_GATEWAY_TOKEN;
   return { url, ...(token ? { token } : {}), clientName: 'gateway-client', clientDisplayName: 'Macaron Artifacts', clientVersion: '0.1.0', platform: process.platform, mode: 'backend', role: 'operator', scopes: ['operator.read', 'operator.write', 'operator.approvals'], caps: ['tool-events'], minProtocol: 4, maxProtocol: 4, onEvent, onConnectError: onError };
 }
 
@@ -82,7 +83,13 @@ async function createClient(turn: HarnessTurn, queue: EventQueue<ChatChunk>, ses
 
 export const openClawAdapter: HarnessAdapter = {
   id: 'openclaw' as never,
-  async info(): Promise<HarnessInfo> { const version = await executableVersion(OPENCLAW()); return { id: 'openclaw' as never, name: 'OpenClaw', available: Boolean(version), detail: version || 'Install OpenClaw', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } }; },
+  async info(profile): Promise<HarnessInfo> {
+    let sdkAvailable = false, validUrl = false;
+    try { sdkAvailable = typeof (await import('@openclaw/gateway-client')).GatewayClient === 'function'; } catch { /* Missing or broken bundled SDK. */ }
+    try { validUrl = ['ws:', 'wss:', 'http:', 'https:'].includes(new URL(gatewayUrl(profile)).protocol); } catch { /* Invalid configuration is authoritative. */ }
+    const detail = !sdkAvailable ? 'Gateway Client SDK 不可用，请重新安装 Artifacts' : !validUrl ? 'Gateway URL 无效，需要 ws://、wss://、http:// 或 https:// 地址' : '内置 Gateway Client，无需本机 CLI；需要外部 Gateway，连接和认证尚未检查';
+    return { id: 'openclaw', name: 'OpenClaw', available: sdkAvailable && validUrl, source: 'gateway', detail, capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } };
+  },
   async profileOptions(): Promise<ProfileOptions> { return { models: [], efforts: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] }; },
   async *run(turn): AsyncIterable<ChatChunk> {
     if (turn.signal.aborted) throw abortError();

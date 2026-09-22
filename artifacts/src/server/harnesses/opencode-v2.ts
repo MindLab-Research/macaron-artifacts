@@ -127,7 +127,7 @@ export const openCodeV2Adapter: HarnessAdapter = {
   id: 'opencode-v2',
   async info() {
     const result = await openCodeBinary(2);
-    return { id: 'opencode-v2', name: 'OpenCode v2', available: result.available, detail: result.detail, capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: false, approvals: true, fork: true } };
+    return { id: 'opencode-v2', name: 'OpenCode v2', available: result.available, detail: result.detail, source: 'native-cli', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: false, approvals: true, fork: true } };
   },
   async profileOptions(cwd, profile) {
     const signal = AbortSignal.timeout(20000), connection = await startOpenCodeV2(cwd, signal, profile);

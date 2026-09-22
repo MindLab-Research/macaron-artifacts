@@ -35,8 +35,8 @@ export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<
   });
 }
 
-export function executableVersion(binary: string): Promise<string | undefined> {
-  return new Promise((resolve) => execFile(binary, ['--version'], { timeout: 5000, maxBuffer: 4096 }, (error, stdout) => resolve(error ? undefined : stdout.trim())));
+export function executableVersion(binary: string, args: string[] = ['--version']): Promise<string | undefined> {
+  return new Promise((resolve) => execFile(binary, args, { timeout: 5000, maxBuffer: 4096 }, (error, stdout) => resolve(error ? undefined : stdout.trim())));
 }
 
 // Native diagnostics occasionally include authorization headers; never expose those in the WebUI.

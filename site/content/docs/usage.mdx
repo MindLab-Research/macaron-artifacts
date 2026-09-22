@@ -7,7 +7,7 @@ Macaron Artifacts runs Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw in
 
 ## Install
 
-Macaron Artifacts requires Node.js 22.19 or newer. Install and authenticate Claude Code, Codex, or OpenCode before starting the app; it inherits their local configuration. The pi SDK is included and reads `~/.pi/agent`, while Hermes and OpenClaw connect through their configured gateways.
+Macaron Artifacts requires Node.js 22.19 or newer. Claude Code and pi use bundled SDKs; keep optional dependencies installed for Claude's native runtime. Codex and OpenCode v1/v2 require the corresponding native CLI. Provider authentication is configured separately. pi reads `~/.pi/agent`; Hermes can use a local CLI or a configured gateway, while OpenClaw uses the bundled Gateway Client with an external gateway. Availability does not verify provider credentials or gateway connectivity.
 
 Run this commit's preview package:
 
@@ -104,13 +104,13 @@ CLI options override their environment variables.
 | `MACARON_PASSWORD` | Shared service password; also accepted as `--password`; required for non-loopback listening or public origins |
 | `MACARON_PUBLIC_ORIGIN` | Exact browser origin behind a reverse proxy, for example `https://artifacts.example.com`; also accepted as `--public-origin` |
 | `MACARON_DATA_DIR` | Conversation storage, default `~/.macaron-artifacts/sessions` |
-| `MACARON_CLAUDE_PATH` | Claude Code executable |
+| `MACARON_CLAUDE_PATH` | Optional authoritative Claude CLI/script override; otherwise use the bundled SDK runtime |
 | `MACARON_CODEX_PATH` | Codex executable |
-| `MACARON_OPENCODE_PATH` | OpenCode executable |
+| `MACARON_OPENCODE_PATH` | Native OpenCode v1 executable |
+| `MACARON_OPENCODE_V2_PATH` | Native OpenCode v2 executable (also named `opencode`) |
 | `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
 | `MACARON_HERMES_PATH` | Hermes executable |
 | `MACARON_HERMES_URL` | Optional Hermes gateway URL |
-| `MACARON_OPENCLAW_PATH` | OpenClaw executable |
 | `OPENCLAW_GATEWAY_URL` | Optional OpenClaw gateway URL |
 | `MACARON_PAIR` | Enable one-time hosted WebUI pairing (`1` or `true`) |
 | `MACARON_ALLOWED_ORIGINS` | Comma-separated allowed website origins |

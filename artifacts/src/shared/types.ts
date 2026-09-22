@@ -1,8 +1,9 @@
 import type { InferUIMessageChunk, UIMessage } from 'ai';
 import type { QuestionState } from './questions.js';
 
+export type RuntimeSource = 'bundled-sdk' | 'native-cli' | 'gateway' | 'script';
+export interface HarnessInfo { id: HarnessId; name: string; available: boolean; detail?: string; source?: RuntimeSource; capabilities: { textDeltas: boolean; reasoningDeltas: boolean; toolInputDeltas: boolean; commandOutputDeltas: boolean; approvals: boolean; fork: boolean } }
 export type HarnessId = 'claude-code' | 'codex' | 'opencode' | 'opencode-v2' | 'pi' | 'hermes' | 'openclaw';
-export interface HarnessInfo { id: HarnessId; name: string; available: boolean; detail?: string; capabilities: { textDeltas: boolean; reasoningDeltas: boolean; toolInputDeltas: boolean; commandOutputDeltas: boolean; approvals: boolean; fork: boolean } }
 // Import graphs follow disk snapshots, independently of each streamed source revision.
 export interface Artifact { path: string; source: string; streaming: boolean; revision: number; importsRevision?: number }
 export interface Approval { id: string; tool: string; input: unknown }

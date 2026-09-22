@@ -108,7 +108,7 @@ export const codexAdapter: HarnessAdapter = {
   id: 'codex',
   async info() {
     const version = await executableVersion(process.env.MACARON_CODEX_PATH || 'codex');
-    return { id: 'codex', name: 'Codex', available: Boolean(version), detail: version || 'Install the Codex CLI', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: false, commandOutputDeltas: true, approvals: true, fork: true } };
+    return { id: 'codex', name: 'Codex', available: Boolean(version), detail: version || 'Install the Codex CLI', source: 'native-cli', capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: false, commandOutputDeltas: true, approvals: true, fork: true } };
   },
   async profileOptions(cwd, profile) {
     const runtime = codexProfileRuntime(profile), connection = new CodexRpc(process.env.MACARON_CODEX_PATH || 'codex', { cwd, env: runtime.env, config: runtime.startup, secrets: runtime.secrets });
