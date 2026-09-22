@@ -43,7 +43,7 @@ const REVEAL_RAMP = 4;
 /** 两条边各自吃掉多少：`--fade-*` 是 0～1 的强度，乘 FADE 得到实际带宽。 */
 const MASK = `linear-gradient(180deg,transparent,#000 calc(var(--fade-top) * ${FADE}px),#000 calc(100% - var(--fade-bottom) * ${FADE}px),transparent)`;
 
-export function Collapsible({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+export function Collapsible({ children, className = "", streaming }: { children: React.ReactNode; className?: string; streaming?: boolean }) {
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const controls = useRef<HTMLDivElement>(null);
@@ -58,7 +58,7 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
     setKeyboard(keyboard);
     setOpen(next);
   };
-  const edges = useTailFollow(scroller, height, RAMP);
+  const edges = useTailFollow(scroller, height, RAMP, streaming);
 
   // 流式增长时内容高度每帧都在变，ResizeObserver 比在 render 里量省事，也不会强制同步布局
   useEffect(() => {
@@ -95,9 +95,10 @@ export function Collapsible({ children, className = "" }: { children: React.Reac
           ref={scroller}
           id={contentId} tabIndex={collapsed ? 0 : -1}
           data-export-scroller
-          className="no-scrollbar overflow-y-auto"
+          className="no-scrollbar overflow-y-auto overscroll-contain"
           // Settle layout once; interpolating the height relayouts every following message on each frame.
-          style={{ height: collapsed ? CAP : height || undefined, maskImage: MASK, WebkitMaskImage: MASK }}
+          // Bound the first paint too, before ResizeObserver has measured a large initial chunk.
+          style={{ height: collapsed ? CAP : height || undefined, maxHeight: open ? undefined : CAP, maskImage: MASK, WebkitMaskImage: MASK }}
         >
           <div ref={inner} data-export-content>{children}</div>
         </div>

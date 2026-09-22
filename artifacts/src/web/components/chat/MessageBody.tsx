@@ -24,6 +24,6 @@ export const MessageBody = memo(function MessageBody({ text, messageId, streamin
 function InlineUi4a({ source, ...props }: { source: string; streaming: boolean; scope: string; sessionId: string; onSend: (text: string) => void }) {
   const [showSource, setShowSource] = useState(false);
   const target = useRef<HTMLDivElement>(null);
-  const fallback = <div className="theme-code overflow-clip rounded-xl"><Collapsible><CodeBlock code={source} /></Collapsible></div>;
+  const fallback = <div className="theme-code overflow-clip rounded-xl"><Collapsible streaming={props.streaming}><CodeBlock code={source} /></Collapsible></div>;
   return <div><div data-export-control className="flex min-h-10 items-center justify-end gap-1"><button type="button" onClick={() => setShowSource(value => !value)} aria-pressed={showSource} className="artifact-source-toggle interactive h-9 rounded-md px-2 text-xs text-muted hover:bg-surface-3 hover:text-hover-fg">{showSource ? '预览' : '源码'}</button><ExportMenu target={target} disabled={props.streaming || showSource} /></div><div ref={target}>{showSource ? fallback : <Suspense fallback={fallback}><Ui4aSurface source={source} {...props} /></Suspense>}</div></div>;
 }
