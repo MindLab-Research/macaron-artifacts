@@ -16,7 +16,7 @@ async function replay(events: Event[], overrides: Partial<HarnessTurn> = {}) {
     message(ws, message) {
       const { id, method, params = {} } = JSON.parse(String(message)); requests.push({ method, params });
       const reply = (payload: unknown) => ws.send(JSON.stringify({ type: 'res', id, ok: true, payload }));
-      if (method === 'connect') { connection = params; reply({ type: 'hello-ok', protocol: 4, policy: { tickIntervalMs: 30000 } }); }
+      if (method === 'connect') { connection = params; reply({ type: 'hello-ok', protocol: 4, features: { methods: ['agent', 'sessions.create', 'sessions.patch', 'sessions.delete', 'plugins.inspect'] }, policy: { tickIntervalMs: 30000 } }); }
       else if (method === 'plugins.inspect') reply({ plugin: { enabled: true }, declared: { contracts: ['macaron-metadata-gate'] } });
       else if (method === 'sessions.create') reply({ key: params.key ? `agent:main:${params.key}` : 'agent:main:test', sessionId: 'test-session' });
       else if (method === 'sessions.patch') { if (params.expectedSessionId !== 'test-session') ws.send(JSON.stringify({ type: 'res', id, ok: false, error: { code: 'INVALID_REQUEST', message: 'expectedSessionId required for session lifecycle patch' } })); else { if (params.archived) archived.add(params.key); reply({ ok: true }); } }

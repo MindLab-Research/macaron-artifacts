@@ -154,6 +154,14 @@ Tests exercise harness event conversion, real JSONL RPC framing, approval/cancel
 
 The root package publishes only the unified application. The old `mcc`, `mcx`, and `mkx` distributions are discontinued. Native session-history migration, attachments, and the old administrative panels are outside this adapter slice.
 
+## OpenClaw provider review
+
+When OpenClaw reports a provider review, Artifacts keeps a durable pause, shows the reason, and blocks new sends, retries and queued-message delivery. It does not acknowledge the review, reset/fork the session, or switch providers. Complete the review in the official OpenClaw Control UI, then use **检查复核状态**. Only a successful read of the same Gateway/agent/session generation without a review unlocks sends; failed or mismatched reads keep the pause. Held messages require an explicit send afterward.
+
+Set `OPENCLAW_CONTROL_URL` on the Artifacts server to the browser-accessible Control UI base, for example `https://openclaw.example/proxy-base`. The link uses the official literal session-key route and preserves proxy prefixes. Use an HTTP(S) URL without userinfo, query parameters or a fragment; never put Gateway credentials in it. Without a safe URL, the banner gives manual instructions. This setting is global; installations using multiple Gateway Profiles should leave it unset unless they share that Control UI. A Gateway/agent change while paused cannot clear the old review.
+
+The adapter checks advertised `sessions.describe` support, handles session-scoped review events and rechecks terminal runs. A Gateway explicitly advertising an older method set without describe keeps its old behavior. Missing/invalid capability data is not interpreted as clearance. Local regression coverage uses the real adapter/GatewayClient transport with a synthetic loopback Gateway; it does not establish live provider or deployment acceptance.
+
 ## Deferred adapters
 
 OpenClaw metadata enrichment requires the bundled metadata-gate plugin to be installed and enabled in the Gateway; the adapter refuses to run an unguarded fork. Kimi Code and dsh remain deferred.

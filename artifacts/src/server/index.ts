@@ -12,7 +12,7 @@ import { ActiveConversation } from './conversations.js';
 import { MetadataTasks } from './enrichment.js';
 import { listArtifacts, readUi4aFile, writeUi4aFile } from './artifacts.js';
 import { ProfileStore, validateProfileInput } from './profiles.js';
-import { safeError } from './harnesses/common.js';
+import { safeError, safeProfileError } from './harnesses/common.js';
 import { closeHermesConnections } from './harnesses/hermes.js';
 import { PairingManager, bearerToken, type PairingGrant, type PairingOptions } from './pairing.js';
 import { AccessPolicy, PasswordAuth, type PasswordSession } from './auth.js';
@@ -139,6 +139,7 @@ export async function createArtifactsServer(options: { directory: string; instru
       if (segments[0] === 'api' && segments[1] === 'profiles') {
         const id = segments[2] ? decodeURIComponent(segments[2]) : undefined;
         if (!id && req.method === 'GET') return json(res, await profiles.list());
+        if (id && req.method === 'PUT' && [...store.sessions.values()].some(session => session.profileId === id && (session.providerReview || claims.has(session.id)))) return json(res, { error: '请先完成关联会话的复核，再修改 Profile。' }, 409);
         if ((!id && req.method === 'POST') || (id && req.method === 'PUT')) return json(res, await profiles.save(validateProfileInput(await body(req)), id), id ? 200 : 201);
         if (id && req.method === 'DELETE') {
           const input = await body(req);
@@ -176,7 +177,7 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (segments.length === 3 && req.method === 'PATCH') {
           const input = await body(req), configuration = 'profileId' in input || 'model' in input;
           if (store.sessions.get(session.id) !== session) return json(res, { error: 'Session not found.' }, 404);
-          if (claims.has(session.id) || configuration && (active.has(session.id) || session.status === 'running')) return json(res, { error: '请在当前一轮结束后切换会话配置。' }, 409);
+          if (claims.has(session.id) || configuration && (active.has(session.id) || session.status === 'running' || session.providerReview)) return json(res, { error: '请在当前一轮及复核结束后切换会话配置。' }, 409);
           const profileId = 'profileId' in input ? optionalText(input.profileId, 'Profile') ?? null : session.profileId, release = bindProfile(profileId);
           claims.add(session.id);
           try {
@@ -237,6 +238,20 @@ export async function createArtifactsServer(options: { directory: string; instru
             return json(res, { error: '连接服务暂时没有接受这次操作，请稍后重试。' }, 502);
           }
         }
+        if (segments[3] === 'provider-review' && segments[4] === 'refresh' && segments.length === 5 && req.method === 'POST') {
+          const adapter = harnesses[session.harness];
+          if (!adapter?.refreshProviderReview || !session.nativeId) return json(res, { error: 'This session does not support provider review refresh.' }, 400);
+          if (active.has(session.id) || claims.has(session.id)) return json(res, { error: '请等待当前操作结束后再检查复核状态。' }, 409);
+          claims.add(session.id);
+          const before = session.providerReview;
+          try {
+            const profile = await profiles.resolve(session.profileId, session.harness, session.cwd);
+            try { session.providerReview = await adapter.refreshProviderReview(session.nativeId, session.cwd, profile, before); }
+            catch (error) { throw new Error(safeProfileError(error, profile)); }
+            try { await store.save(session); } catch (error) { session.providerReview = before; throw error; }
+            return json(res, { providerReview: session.providerReview ?? null });
+          } finally { claims.delete(session.id); }
+        }
         if (segments[3] === 'artifacts' && req.method === 'GET') return json(res, await listArtifacts(session.cwd));
         if (segments[3] === 'files') {
           const path = url.searchParams.get('path') ?? '';
@@ -255,6 +270,7 @@ export async function createArtifactsServer(options: { directory: string; instru
       if (url.pathname === '/api/chat' && req.method === 'POST') {
         const input = await body(req), session = store.sessions.get(String(input.id));
         if (!session) return json(res, { error: 'Session not found.' }, 404);
+        if (session.providerReview) return json(res, { error: '会话因服务商复核而暂停，请完成复核并检查状态后再发送。' }, 409);
         if (active.has(session.id) || claims.has(session.id)) return json(res, { error: 'This session already has a running turn.' }, 409);
         const adapter = Object.hasOwn(harnesses, session.harness) ? harnesses[session.harness] : undefined;
         if (!adapter) return json(res, { error: 'This harness is unavailable.' }, 400);

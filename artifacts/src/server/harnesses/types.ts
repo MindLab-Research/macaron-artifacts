@@ -1,4 +1,4 @@
-import type { Approval, ChatChunk, ConnectionState, HarnessId, HarnessInfo } from '../../shared/types.js';
+import type { Approval, ChatChunk, ConnectionState, HarnessId, HarnessInfo, ProviderReview } from '../../shared/types.js';
 import type { ProfileConfig, ProfileOptions } from '../../shared/profiles.js';
 import type { QuestionRequest, QuestionResponse } from '../../shared/questions.js';
 
@@ -40,6 +40,8 @@ export interface HarnessTurn {
   // Enrichment branches retain the exact bootstrap and native history. Only the final user instruction changes.
   enrichment?: boolean;
   onNativeSession: (id: string) => void;
+  providerReview?: ProviderReview;
+  onProviderReview?: (review: ProviderReview) => void;
   approve: (request: Approval) => Promise<boolean>;
   ask: (request: Omit<QuestionRequest, 'id'>, signal?: AbortSignal) => Promise<QuestionResponse>;
   /**
@@ -53,6 +55,7 @@ export interface HarnessAdapter {
   /** Runtime prerequisites only; does not authenticate models or connect to gateways. */
   info(profile?: ResolvedProfile): Promise<HarnessInfo>;
   profileOptions?(cwd: string, profile?: ResolvedProfile): Promise<ProfileOptions>;
+  refreshProviderReview?(nativeId: string, cwd: string, profile?: ResolvedProfile, review?: ProviderReview): Promise<ProviderReview | undefined>;
   // Adapters emit content parts only; session orchestration owns start/finish and persistence.
   run(turn: HarnessTurn): AsyncIterable<ChatChunk>;
 }

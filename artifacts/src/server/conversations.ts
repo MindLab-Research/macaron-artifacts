@@ -2,7 +2,7 @@ import { createWriteStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { finished } from 'node:stream/promises';
 import { createUIMessageStream, readUIMessageStream } from 'ai';
-import type { Approval, ChatChunk, ChatMessage, ConnectionState, Session } from '../shared/types.js';
+import type { Approval, ChatChunk, ChatMessage, ConnectionState, ProviderReview, Session } from '../shared/types.js';
 import { parseQuestionResponse, type QuestionRequest, type QuestionResponse } from '../shared/questions.js';
 import type { ConnectionControls, HarnessAdapter, ResolvedProfile } from './harnesses/types.js';
 import { redactConnection } from './connections.js';
@@ -136,6 +136,11 @@ export class ActiveConversation {
             // turn must resume its native thread rather than silently starting another one.
             nativeCheckpoint = this.store.save(session);
             void nativeCheckpoint.catch(error => { failure = error; this.controller.abort(); });
+          }, providerReview: session.providerReview, onProviderReview: (review: ProviderReview) => {
+            session.providerReview = review;
+            emit({ type: 'data-providerReview', data: review, transient: true });
+            nativeCheckpoint = this.store.save(session);
+            void nativeCheckpoint.catch(error => { failure = error; this.controller.abort(); });
           }, approve, ask, connection };
           for await (const chunk of this.adapter.run(turn)) {
             if (nativeCheckpoint) { await nativeCheckpoint; nativeCheckpoint = undefined; }
@@ -192,7 +197,7 @@ export class ActiveConversation {
       await this.store.save(session);
       if (!diskError) await rm(this.store.journalPath(session.id), { force: true });
       // A profile edit affects the next user turn, never this turn's cache-friendly metadata fork.
-      if (!failure && !diskError && session.nativeId && !this.controller.signal.aborted) this.metadata.start(session, this.adapter, this.instructions, this.profile, this.model);
+      if (!failure && !diskError && !session.providerReview && session.nativeId && !this.controller.signal.aborted) this.metadata.start(session, this.adapter, this.instructions, this.profile, this.model);
     } catch (error) {
       session.status = 'error'; session.error = safeProfileError(error, this.profile);
       this.publish({ type: 'error', errorText: session.error });

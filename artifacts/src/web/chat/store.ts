@@ -1,6 +1,6 @@
 import { Chat } from '@ai-sdk/react';
 import { DefaultChatTransport, type DataUIPart } from 'ai';
-import type { Artifact, ChatMessage, ConnectionCommand, ConnectionView, HarnessId, HarnessInfo, MessageData, Session, SessionSummary } from '../../shared/types';
+import type { Artifact, ChatMessage, ConnectionCommand, ConnectionView, HarnessId, HarnessInfo, MessageData, ProviderReview, Session, SessionSummary } from '../../shared/types';
 import type { QuestionResponse } from '../../shared/questions';
 import { consumeMetadata } from './metadata';
 import { artifactEntryPath } from '../../shared/artifact-path';
@@ -31,6 +31,7 @@ export class WorkspaceStore {
   private files = new Map<string, Map<string, Artifact>>();
   private liveRevisions = new Map<string, Map<string, number>>();
   private queues = new Map<string, QueueItem[]>();
+  private heldQueues = new Set<string>();
   private drafts = new Map<string, string>();
   private draftListeners = new Map<string, Set<() => void>>();
   private inflight = new Set<string>();
@@ -44,7 +45,7 @@ export class WorkspaceStore {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.snapshot;
   private publish(patch: Partial<WorkspaceSnapshot> = {}) { if (this.disposed) return; this.snapshot = { ...this.snapshot, ...patch, revision: this.snapshot.revision + 1 }; for (const listener of this.listeners) listener(); }
-  private update(id: string, patch: Partial<SessionSummary>) { this.publish({ sessions: this.snapshot.sessions.map(session => session.id === id ? { ...session, ...patch } : session) }); }
+  private update(id: string, patch: Partial<SessionSummary>) { if (patch.providerReview) this.heldQueues.add(id); this.publish({ sessions: this.snapshot.sessions.map(session => session.id === id ? { ...session, ...patch } : session) }); }
   clearError = () => this.publish({ error: undefined });
   fail = (error: unknown) => this.publish({ error: error instanceof Error ? error.message : String(error) });
   active = () => this.snapshot.sessions.find(session => session.id === this.snapshot.activeId);
@@ -125,6 +126,7 @@ export class WorkspaceStore {
 
   private onData(id: string, part: DataUIPart<MessageData>) {
     if (this.disposed) return;
+    if (part.type === 'data-providerReview') this.update(id, { providerReview: part.data });
     if (part.type === 'data-artifact') {
       let files = this.files.get(id);
       if (!files) this.files.set(id, files = new Map());
@@ -209,6 +211,8 @@ export class WorkspaceStore {
 
   send = (id: string, text: string) => {
     if (this.disposed || !text.trim()) return;
+    if (this.snapshot.sessions.find(session => session.id === id)?.providerReview) return;
+    this.heldQueues.delete(id);
     this.cancelMetadata(id);
     const queue = this.queue(id);
     this.queues.set(id, [...queue, { id: randomUUID(), text }]);
@@ -218,6 +222,7 @@ export class WorkspaceStore {
   dropQueued = (id: string, itemId: string) => { this.queues.set(id, this.queue(id).filter(item => item.id !== itemId)); this.publish(); };
   private async drain(id: string) {
     if (this.disposed) return;
+    if (this.heldQueues.has(id) || this.snapshot.sessions.find(session => session.id === id)?.providerReview) return;
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id) || chat.status === 'streaming' || chat.status === 'submitted') return;
     const [item, ...rest] = this.queue(id);
@@ -246,6 +251,7 @@ export class WorkspaceStore {
   };
   retry = async (id: string) => {
     if (this.disposed) return;
+    if (this.snapshot.sessions.find(session => session.id === id)?.providerReview) return;
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id) || chat.status === 'streaming' || chat.status === 'submitted') return;
     this.inflight.add(id);
@@ -256,6 +262,7 @@ export class WorkspaceStore {
     try {
       const remote = await api<Session>(`/api/sessions/${id}`);
       if (this.disposed || this.turns.get(id) !== turn) return;
+      if (remote.providerReview) { this.update(id, { providerReview: remote.providerReview }); return; }
       const lastUser = chat.messages.findLast(message => message.role === 'user');
       if (lastUser && !remote.messages.some(message => message.id === lastUser.id)) {
         if (remote.status === 'running') throw new Error('这个会话仍有一轮正在生成，请稍后重试。');
@@ -293,6 +300,12 @@ export class WorkspaceStore {
     void this.drain(id);
   };
   approve = (id: string, approvalId: string, approved: boolean) => api(`/api/sessions/${id}/approvals/${encodeURIComponent(approvalId)}`, { method: 'POST', body: JSON.stringify({ approved }) });
+  refreshProviderReview = async (id: string) => {
+    const result = await api<{ providerReview: ProviderReview | null }>(`/api/sessions/${id}/provider-review/refresh`, { method: 'POST' });
+    if (!this.disposed) this.update(id, { providerReview: result.providerReview ?? undefined });
+    // Deliberately do not drain: clearance is not consent to send held messages.
+  };
+  sendQueued = (id: string) => { if (this.snapshot.sessions.find(session => session.id === id)?.providerReview) return; this.heldQueues.delete(id); void this.drain(id); };
   answer = (id: string, questionId: string, response: QuestionResponse) => api(`/api/sessions/${id}/questions/${encodeURIComponent(questionId)}`, { method: 'POST', body: JSON.stringify(response) });
   respondConnection = (id: string, requestId: string, body: ConnectionCommand) => api(`/api/sessions/${id}/connections/${encodeURIComponent(requestId)}`, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ state?: ConnectionView }>;
   openArtifact = (id: string, path: string) => { const session = this.snapshot.sessions.find(session => session.id === id), entry = session && artifactEntryPath(path, session.cwd); if (!entry) return; this.selectedArtifacts.set(id, entry); this.dismissed.delete(id); this.publish(); };

@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ChatChunk, HarnessInfo } from '../../shared/types.js';
 import type { ProfileOptions } from '../../shared/profiles.js';
 import type { HarnessAdapter, HarnessTurn, ResolvedProfile } from './types.js';
 import { abortError, EventQueue, record, safeError, string } from './common.js';
+import { describeProviderReview, readProviderReview } from './openclaw-review.js';
 
 type GatewayClient = import('@openclaw/gateway-client').GatewayClient;
 type GatewayOptions = import('@openclaw/gateway-client').GatewayClientOptions;
@@ -33,6 +34,7 @@ function options(turn: HarnessTurn, onEvent: (event: GatewayEvent) => void, onEr
 }
 
 const selectedAgent = (turn: HarnessTurn) => turn.profile?.config.agent || turn.profile?.config.nativeProfile;
+const reviewScope = (turn: HarnessTurn) => createHash('sha256').update(JSON.stringify([turn.profile?.config.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789', selectedAgent(turn) ?? null])).digest('hex');
 
 async function assertMetadataGate(client: GatewayClient): Promise<void> {
   const inspected = record(await client.request('plugins.inspect', { pluginId: METADATA_PLUGIN_ID }));
@@ -57,13 +59,20 @@ function emitTool(data: Record<string, unknown>, state: StreamState, queue: Even
   const output = data.result ?? data.output ?? data.result_text; if (output !== undefined) queue.push({ type: 'tool-output-available', toolCallId, output, dynamic: true, providerExecuted: true });
 }
 
-async function createClient(turn: HarnessTurn, queue: EventQueue<ChatChunk>, session: { key?: string; runId: string }, state: StreamState, signal: AbortSignal, approve: HarnessTurn['approve']): Promise<GatewayClient> {
+async function createClient(turn: HarnessTurn, queue: EventQueue<ChatChunk>, session: { key?: string; id?: string; runId: string; methods?: string[] }, state: StreamState, signal: AbortSignal, approve: HarnessTurn['approve'], readOnly = false): Promise<GatewayClient> {
   let client: GatewayClient | undefined;
   let readyResolve!: () => void, readyReject!: (error: Error) => void;
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   const onError = (error: Error) => { readyReject(error); queue.fail(error); };
   const onEvent = (event: GatewayEvent) => {
+    if (readOnly) return;
     const p = payload(event), sid = eventSession(event), rid = eventRun(event);
+    // Review facts are session-scoped, not tied to the agent request's run ID.
+    if (event.event === 'sessions.updated' && session.key && sid === session.key && session.id && p.sessionId === session.id && p.providerReview != null && !turn.enrichment) {
+      try { const review = readProviderReview(p.providerReview, { key: session.key, id: session.id }, process.env.OPENCLAW_CONTROL_URL); if (review) turn.onProviderReview?.(review); }
+      catch (error) { queue.fail(error); }
+      return;
+    }
     if (session.key && ((sid && sid !== session.key) || (rid && rid !== session.runId) || (!sid && !rid))) return;
     if (event.event === 'connect.challenge') return;
     if (event.event === 'exec.approval.requested') { if (!sid && !rid) return; const request = record(p.request), approvalId = string(p.id || p.approvalId); void approve({ id: approvalId, tool: string(request.command || request.tool || 'exec'), input: request }).then(ok => client?.request('exec.approval.resolve', { id: approvalId, decision: ok ? 'allow-once' : 'deny' })).catch(onError); return; }
@@ -73,12 +82,16 @@ async function createClient(turn: HarnessTurn, queue: EventQueue<ChatChunk>, ses
     if ((stream === 'lifecycle' && ['end', 'error'].includes(phase)) || (event.event === 'chat' && ['final', 'aborted', 'error'].includes(phase))) { if (state.textId) queue.push({ type: 'text-end', id: state.textId }); if (state.thoughtId) queue.push({ type: 'reasoning-end', id: state.thoughtId }); if (phase === 'error') queue.fail(new Error(safeError(data.error || data.errorMessage || 'OpenClaw run failed'))); else queue.end(); }
   };
   const clientOptions = options(turn, onEvent, onError);
-  clientOptions.onClose = (_code, reason) => { if (reason) queue.fail(new Error(`OpenClaw Gateway closed: ${reason}`)); };
-  clientOptions.onHelloOk = () => readyResolve();
+  if (readOnly) { clientOptions.scopes = ['operator.read']; clientOptions.caps = []; }
+  clientOptions.onClose = (_code, reason) => onError(new Error(`OpenClaw Gateway closed: ${reason || 'connection closed'}`));
+  clientOptions.onHelloOk = hello => { session.methods = hello.features?.methods; readyResolve(); };
   client = new (await import('@openclaw/gateway-client')).GatewayClient(clientOptions);
-  client.start();
-  await Promise.race([ready, new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(abortError()), { once: true }))]);
-  return client;
+  const abortReady = () => readyReject(abortError());
+  signal.addEventListener('abort', abortReady, { once: true });
+  const timer = setTimeout(() => readyReject(new Error('OpenClaw Gateway connection timeout')), 8000);
+  try { if (signal.aborted) throw abortError(); client.start(); await ready; return client; }
+  catch (error) { await client.stopAndWait({ timeoutMs: 1000 }).catch(() => client?.stop()); throw error; }
+  finally { clearTimeout(timer); signal.removeEventListener('abort', abortReady); }
 }
 
 export const openClawAdapter: HarnessAdapter = {
@@ -91,9 +104,23 @@ export const openClawAdapter: HarnessAdapter = {
     return { id: 'openclaw', name: 'OpenClaw', available: sdkAvailable && validUrl, source: 'gateway', detail, capabilities: { textDeltas: true, reasoningDeltas: true, toolInputDeltas: true, commandOutputDeltas: true, approvals: true, fork: true } };
   },
   async profileOptions(): Promise<ProfileOptions> { return { models: [], efforts: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] }; },
+  async refreshProviderReview(nativeId, cwd, profile, review) {
+    const native = decode(nativeId, cwd);
+    if (!native?.id) throw new Error('Exact OpenClaw session generation is required to refresh review status.');
+    const turn: HarnessTurn = { nativeId, cwd, profile, prompt: '', instructions: '', signal: AbortSignal.timeout(10000), onNativeSession() {}, ask: async () => ({ cancelled: true }), approve: async () => false };
+    const scope = reviewScope(turn);
+    if (review && (review.scope !== scope || review.sessionId !== native.id)) throw new Error('OpenClaw Gateway or session identity changed; review status was not cleared.');
+    const ref = { ...native, runId: '' }, queue = new EventQueue<ChatChunk>();
+    const client = await createClient(turn, queue, ref, { text: '', thought: '', textId: '', thoughtId: '', tools: new Set() }, turn.signal, turn.approve, true);
+    try { const current = (await describeProviderReview(client, native, selectedAgent(turn), process.env.OPENCLAW_CONTROL_URL)).review; return current ? { ...current, scope } : undefined; }
+    finally { await client.stopAndWait({ timeoutMs: 1000 }).catch(() => client.stop()); }
+  },
   async *run(turn): AsyncIterable<ChatChunk> {
     if (turn.signal.aborted) throw abortError();
-    const queue = new EventQueue<ChatChunk>(), state: StreamState = { text: '', thought: '', textId: '', thoughtId: '', tools: new Set() }, controller = new AbortController(), signal = AbortSignal.any([turn.signal, controller.signal]), runId = randomUUID(), parent = decode(turn.nativeId, turn.cwd), sessionRef = { key: parent?.key, runId };
+    if (turn.providerReview) throw new Error('OpenClaw session is paused for provider review.');
+    const reportReview = turn.onProviderReview, scope = reviewScope(turn);
+    turn = { ...turn, onProviderReview: review => reportReview?.({ ...review, scope }) };
+    const queue = new EventQueue<ChatChunk>(), state: StreamState = { text: '', thought: '', textId: '', thoughtId: '', tools: new Set() }, controller = new AbortController(), signal = AbortSignal.any([turn.signal, controller.signal]), runId = randomUUID(), parent = decode(turn.nativeId, turn.cwd), sessionRef: { key?: string; id?: string; runId: string; methods?: string[] } = { key: parent?.key, id: parent?.id, runId };
     let client: GatewayClient | undefined, active: NativeSession | undefined, terminal = false;
     const abort = () => { controller.abort(); if (client && active) void client.request('chat.abort', { sessionKey: active.key, runId }).catch(() => {}); queue.fail(abortError()); };
     turn.signal.addEventListener('abort', abort, { once: true });
@@ -103,11 +130,27 @@ export const openClawAdapter: HarnessAdapter = {
       const agentId = selectedAgent(turn);
       const created = turn.enrichment ? await client.request<Record<string, unknown>>('sessions.create', { key: `${METADATA_SESSION_PREFIX}${randomUUID()}`, parentSessionKey: parent?.key, fork: true, forkFrom: 'last-completed', emitCommandHooks: true, succeedsParent: false, ...(agentId ? { agentId } : {}), cwd: turn.cwd, model: turn.model || turn.profile?.config.model, thinkingLevel: turn.profile?.config.effort }) : parent ? { key: parent.key, sessionId: parent.id } : await client.request<Record<string, unknown>>('sessions.create', { ...(agentId ? { agentId } : {}), cwd: turn.cwd, model: turn.model || turn.profile?.config.model, thinkingLevel: turn.profile?.config.effort });
       active = { key: string(created.key || created.sessionKey || created.id || created.sessionId), id: string(created.sessionId || created.id) || undefined, cwd: turn.cwd }; if (!active.key) throw new Error('OpenClaw did not return a session key'); sessionRef.key = active.key;
-      if (!turn.enrichment) turn.onNativeSession(encode(active));
+      sessionRef.id = active.id;
+      if (!turn.enrichment) {
+        // Only a positively advertised old method set may omit this preflight.
+        if (!sessionRef.methods || sessionRef.methods.includes('sessions.describe')) {
+          const described = await describeProviderReview(client, active, agentId, process.env.OPENCLAW_CONTROL_URL);
+          active.id = sessionRef.id = described.sessionId;
+          turn.onNativeSession(encode(active));
+          if (described.review) { turn.onProviderReview?.(described.review); throw new Error('OpenClaw session is paused for provider review.'); }
+          if (sessionRef.methods?.includes('sessions.subscribe')) await client.request('sessions.subscribe', {}, { timeoutMs: 5000 });
+        } else turn.onNativeSession(encode(active));
+      }
       const producer = client.request('agent', { sessionKey: active.key, sessionId: active.id, message: turn.prompt, extraSystemPrompt: turn.instructions, idempotencyKey: runId }).catch(error => queue.fail(error));
-      yield* queue;
-      await producer;
-    } catch (error) { queue.fail(signal.aborted ? abortError() : new Error(safeError(error))); yield* queue; }
+      try { yield* queue; await producer; }
+      finally {
+        if (!turn.enrichment && !signal.aborted && (!sessionRef.methods || sessionRef.methods.includes('sessions.describe'))) {
+          const described = await describeProviderReview(client, active, agentId, process.env.OPENCLAW_CONTROL_URL);
+          if (described.review) turn.onProviderReview?.(described.review);
+          // Absence here never clears an observed pause. Only explicit refresh can do so.
+        }
+      }
+    } catch (error) { throw signal.aborted ? abortError() : new Error(safeError(error)); }
     finally { turn.signal.removeEventListener('abort', abort); controller.abort(); if (client && active && turn.enrichment) { const key = active.key, expectedSessionId = active.id; /* Deleting only archived forks stays within operator.write instead of requiring admin. */ await client.request('sessions.patch', { key, expectedSessionId, archived: true }).then(() => client!.request('sessions.delete', { key, expectedSessionId, deleteTranscript: true, archivedOnly: true })).catch(error => console.warn(`OpenClaw metadata fork cleanup failed: ${safeError(error)}`)); } await client?.stopAndWait({ timeoutMs: 1_000 }).catch(() => client?.stop()); }
   },
 };

@@ -7,7 +7,6 @@ export type HarnessId = 'claude-code' | 'codex' | 'opencode' | 'opencode-v2' | '
 // Import graphs follow disk snapshots, independently of each streamed source revision.
 export interface Artifact { path: string; source: string; streaming: boolean; revision: number; importsRevision?: number }
 export interface Approval { id: string; tool: string; input: unknown }
-
 export type ConnectionTargetKind = 'connector' | 'mcp';
 export type ConnectionTargetAction = 'authorize' | 'connect' | 'enable' | 'install' | 'reconnect';
 export type ConnectionTargetState = 'pending' | 'initiated' | 'connected' | 'skipped' | 'failed' | 'expired' | 'not_connected';
@@ -67,8 +66,9 @@ export interface ConnectionView extends ConnectionState {
   actionable: boolean;
 }
 
-export type MessageData = { artifact: Artifact; command: { toolCallId: string; output: string }; approval: Approval & { resolved?: boolean }; question: QuestionState; connection: ConnectionView; usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }; recap: { title?: string; suggestions: string[] } };
+export interface ProviderReview { id: string; runId: string; sessionId: string; canContinue: boolean; scope?: string; explanation?: string; continuationMessage?: string; controlUrl?: string }
+export type MessageData = { providerReview: ProviderReview; artifact: Artifact; command: { toolCallId: string; output: string }; approval: Approval & { resolved?: boolean }; question: QuestionState; connection: ConnectionView; usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }; recap: { title?: string; suggestions: string[] } };
 export type ChatMessage = UIMessage<{ interrupted?: boolean }, MessageData>;
 export type ChatChunk = InferUIMessageChunk<ChatMessage>;
-export interface Session { id: string; harness: HarnessId; cwd: string; title: string; model?: string; profileId?: string | null; nativeId?: string; messages: ChatMessage[]; suggestions: string[]; createdAt: number; updatedAt: number; status: 'idle' | 'running' | 'error'; error?: string }
+export interface Session { id: string; harness: HarnessId; cwd: string; title: string; model?: string; profileId?: string | null; nativeId?: string; messages: ChatMessage[]; suggestions: string[]; createdAt: number; updatedAt: number; status: 'idle' | 'running' | 'error'; error?: string; providerReview?: ProviderReview }
 export type SessionSummary = Omit<Session, 'messages'>;
