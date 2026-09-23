@@ -29,4 +29,12 @@ Native HTML and Wind4 utilities handle layout, and Headless UI can be imported f
 
 ## Authoring rules
 
-The generated skill requires a default React export, stable component and import names during streaming, accessible labels, useful empty states, and explicit user actions before sending messages or writing files. It forbids invented `$ui4a/*` modules, credential storage, command execution, and directory listing.
+The generated skill reconsiders presentation on every turn. Direct facts stay concise prose; multi-stage mechanisms and comparisons favor a focused inline explorer without waiting for the user to request a drawing. Quantities and scaling favor a compact chart with explicit baselines and units, using cited facts or stated formulas rather than invented measurements. A complete overview that would crowd the conversation belongs in a Canvas, with the selected stage or path inline. Separately requested inline and Canvas views must both be delivered.
+
+Clarification forms collect only information that changes the answer, preserve their submitted state, and send one readable user turn on explicit submission. Reading controls such as tabs, filters, and diagram selections stay local. The explicit-action rule applies to generated UI callbacks that send messages or write files; it does not require another confirmation before the harness writes a Canvas as part of an answer.
+
+Every saved Canvas revision must be runnable, including the first scaffold and later edits. Imports, helpers, and their use must be added together or in dependency order. A retained older preview is not evidence that the new revision works. Inline delivery uses `ui4a/tsx`; Canvas delivery uses `.ui4a.tsx`. Harness-specific widget references, HTML attachments, and Mermaid fences do not substitute for those formats.
+
+Design guidance is included in the injected skill: explicit spacing, readable HTML diagram labels, a shared detail region, and one data model for formulas, chart values, units, and captions. Pair each foreground with its immediate background (`surface-2` with `fg`, solid `accent` with `accent-fg`); series colors belong on marks and connectors. SVG labels need an explicit `fill`, and weak evidence retains readable text. When a preview is available, check narrow containers, both host modes, and contrast after alpha compositing; do not claim checks that were not run. These rules guide future generation and edits rather than rewriting existing artifacts.
+
+The skill also requires a default React export, stable component and import names during streaming, accessible labels, and useful empty states. Generated UI must not invent `$ui4a/*` modules, store credentials, or assume access to command execution or directory listing.
