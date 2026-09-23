@@ -18,6 +18,7 @@ import { PairingManager, bearerToken, type PairingGrant, type PairingOptions } f
 import { AccessPolicy, PasswordAuth, type PasswordSession } from './auth.js';
 import { ConnectionInputError, connectionActionable, redactConnection, validateConnectionResponse } from './connections.js';
 import type { ConnectionControls } from './harnesses/types.js';
+import { resolvePromptReferences, searchWorkspaceFiles } from './prompt-references.js';
 
 export async function createArtifactsServer(options: { directory: string; instructions: string; harnesses?: Partial<Record<HarnessId, HarnessAdapter>>; profiles?: ProfileStore; webRoot?: string; pairing?: PairingOptions; host?: string; password?: string; publicOrigin?: string }) {
   const access = new AccessPolicy(options), auth = await PasswordAuth.create(options.password);
@@ -253,6 +254,7 @@ export async function createArtifactsServer(options: { directory: string; instru
           } finally { claims.delete(session.id); }
         }
         if (segments[3] === 'artifacts' && req.method === 'GET') return json(res, await listArtifacts(session.cwd));
+        if (segments[3] === 'files' && segments[4] === 'search' && req.method === 'GET') return json(res, await searchWorkspaceFiles(session.cwd, url.searchParams.get('q') ?? ''));
         if (segments[3] === 'files') {
           const path = url.searchParams.get('path') ?? '';
           if (req.method === 'GET') { const source = await readUi4aFile(session.cwd, path); res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }); return res.end(source); }
@@ -276,8 +278,8 @@ export async function createArtifactsServer(options: { directory: string; instru
         if (!adapter) return json(res, { error: 'This harness is unavailable.' }, 400);
         const messages = Array.isArray(input.messages) ? input.messages as ChatMessage[] : [];
         const user = messages.findLast(message => message.role === 'user');
-        const prompt = user?.parts?.filter(part => part.type === 'text').map(part => part.text).join('\n').trim();
-        if (!user || !prompt) return json(res, { error: 'A user message is required.' }, 400);
+        const rawPrompt = user?.parts?.filter(part => part.type === 'text').map(part => part.text).join('\n').trim();
+        if (!user || !rawPrompt) return json(res, { error: 'A user message is required.' }, 400);
         const retry = session.status === 'error' && session.messages.some(message => message.id === user.id);
         if (session.messages.some(message => message.id === user.id) && !retry) return json(res, { error: 'This message was already submitted.' }, 409);
         // Claim before the first await. Two simultaneous POSTs must never both
@@ -288,9 +290,14 @@ export async function createArtifactsServer(options: { directory: string; instru
         try {
           // null records an explicit switch back to native defaults; absent IDs preserve legacy session behavior.
           const profile = await profiles.resolve(session.profileId, session.harness, session.cwd);
+          // Retry the accepted request with its original file snapshots, even if workspace files changed or disappeared.
+          const savedUser = retry ? session.messages.find(message => message.id === user.id) : undefined;
+          const reference = savedUser ? { references: savedUser.metadata?.references ?? [], context: savedUser.metadata?.referenceContext ?? '' } : await resolvePromptReferences(session.cwd, user.metadata?.references);
+          const text = savedUser ? savedUser.parts.filter(part => part.type === 'text').map(part => part.text).join('\n') : rawPrompt;
+          const prompt = text + reference.context;
           if (!retry) {
-            session.messages.push({ id: user.id || crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: prompt }] });
-            if (session.messages.length === 1) session.title = prompt.slice(0, 60);
+            session.messages.push({ id: user.id || crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: rawPrompt }], ...(reference.references.length ? { metadata: { references: reference.references, referenceContext: reference.context } } : {}) });
+            if (session.messages.length === 1) session.title = rawPrompt.slice(0, 60);
           }
           session.status = 'running'; session.error = undefined; session.suggestions = []; session.updatedAt = Date.now();
           await store.save(session);

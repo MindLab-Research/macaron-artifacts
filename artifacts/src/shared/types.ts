@@ -1,4 +1,5 @@
 import type { InferUIMessageChunk, UIMessage } from 'ai';
+import type { PromptReference } from './prompt-references.js';
 import type { QuestionState } from './questions.js';
 
 export type RuntimeSource = 'bundled-sdk' | 'native-cli' | 'gateway' | 'script';
@@ -68,7 +69,7 @@ export interface ConnectionView extends ConnectionState {
 
 export interface ProviderReview { id: string; runId: string; sessionId: string; canContinue: boolean; scope?: string; explanation?: string; continuationMessage?: string; controlUrl?: string }
 export type MessageData = { providerReview: ProviderReview; artifact: Artifact; command: { toolCallId: string; output: string }; approval: Approval & { resolved?: boolean }; question: QuestionState; connection: ConnectionView; usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }; recap: { title?: string; suggestions: string[] } };
-export type ChatMessage = UIMessage<{ interrupted?: boolean }, MessageData>;
+export type ChatMessage = UIMessage<{ interrupted?: boolean; references?: PromptReference[]; referenceContext?: string }, MessageData>;
 export type ChatChunk = InferUIMessageChunk<ChatMessage>;
 export interface Session { id: string; harness: HarnessId; cwd: string; title: string; model?: string; profileId?: string | null; nativeId?: string; messages: ChatMessage[]; suggestions: string[]; createdAt: number; updatedAt: number; status: 'idle' | 'running' | 'error'; error?: string; providerReview?: ProviderReview }
 export type SessionSummary = Omit<Session, 'messages'>;

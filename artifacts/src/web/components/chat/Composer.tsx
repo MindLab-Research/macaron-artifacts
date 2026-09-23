@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef } from 'react';
 import { useInputHistory } from './useInputHistory';
 import { Icon } from '../Icon';
+import { PromptBar } from './PromptBar';
+import { promptReferences, type PromptReference } from '../../../shared/prompt-references';
 
-export function Composer({ text, setText, disabled, busy, onSend, onStop }: { text: string; setText: (text: string) => void; disabled: boolean; busy: boolean; onSend: (text: string) => void; onStop: () => void }) {
+export function Composer({ text, setText, disabled, busy, onSend, onStop, searchReferences }: { text: string; setText: (text: string) => void; disabled: boolean; busy: boolean; onSend: (text: string, references?: PromptReference[]) => void; onStop: () => void; searchReferences: (query: string) => Promise<PromptReference[]> }) {
   const helpId = useId();
   const area = useRef<HTMLTextAreaElement>(null);
   const history = useInputHistory(text, setText, area);
@@ -18,10 +20,10 @@ export function Composer({ text, setText, disabled, busy, onSend, onStop }: { te
   }, []);
   useEffect(() => { const element = area.current; if (element) { element.style.height = '0px'; element.style.height = `${Math.min(element.scrollHeight, 200)}px`; } }, [text]);
   const sendable = !disabled && Boolean(text.trim());
-  const submit = () => { if (!sendable) return; onSend(text.trim()); history.remember(text.trim()); setText(''); };
-  return <div className="shrink-0 p-3"><div className="interactive mx-auto flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-input-border bg-input-bg p-2 focus-within:border-focus">
+  const submit = () => { if (!sendable) return; onSend(text.trim(), promptReferences(text)); history.remember(text.trim()); setText(''); };
+  return <div className="shrink-0 p-3"><div className="relative mx-auto w-full max-w-3xl rounded-2xl border border-input-border bg-input-bg focus-within:border-focus"><PromptBar text={text} setText={setText} search={searchReferences} /><div className="interactive flex items-end gap-2 p-2">
     <textarea ref={area} value={text} rows={1} disabled={disabled} placeholder="让它给你造个界面…" aria-label="消息" aria-describedby={helpId} title="/ 聚焦　↑↓ 翻历史　Enter 发送　Shift+Enter 换行" onChange={event => { history.onEdit(); setText(event.target.value); }} onKeyDown={event => { if (history.onKeyDown(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} className="max-h-50 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-input-fg outline-none placeholder:text-input-placeholder" />
     {busy ? <button type="button" onClick={onStop} title="停止" aria-label="停止" className={`pressable interactive grid size-8 shrink-0 place-items-center rounded-full ${sendable ? 'text-muted hover:bg-surface-3 hover:text-hover-fg' : 'bg-accent text-accent-fg hover:bg-accent-hover active:scale-95'}`}><Icon name="x" filled className="size-3.5" /></button> : null}
     {busy && !sendable ? null : <button type="button" onClick={submit} disabled={!sendable} title={busy ? '加入队列' : '发送'} aria-label={busy ? '加入队列' : '发送'} className={`pressable interactive grid size-8 shrink-0 place-items-center rounded-full ${sendable ? 'bg-accent text-accent-fg hover:bg-accent-hover active:scale-95' : 'cursor-not-allowed bg-surface-3 text-muted'}`}><Icon name="send" /></button>}
-  </div><span id={helpId} className="sr-only">斜杠聚焦输入框，上下键浏览历史，Enter 发送，Shift 加 Enter 换行</span></div>;
+  </div></div><span id={helpId} className="sr-only">斜杠聚焦输入框，上下键浏览历史，Enter 发送，Shift 加 Enter 换行</span></div>;
 }

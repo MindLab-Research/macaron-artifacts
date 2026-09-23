@@ -1,0 +1,8 @@
+import { afterEach, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { resolvePromptReferences, searchWorkspaceFiles } from './prompt-references';
+let directory = '';
+afterEach(async () => { if (directory) await rm(directory, { recursive: true, force: true }); directory = ''; });
+test('searches bounded workspace files and expands references server-side', async () => { directory = await mkdtemp('/tmp/artifacts-reference-'); await mkdir(join(directory, 'src')); await writeFile(join(directory, 'src/theme.ts'), 'export const gap = 16;'); await mkdir(join(directory, '.artifacts/canvases'), { recursive: true }); await writeFile(join(directory, '.artifacts/canvases/demo.ui4a.tsx'), '<div />'); expect((await searchWorkspaceFiles(directory, 'theme')).map(item => item.path)).toEqual(['src/theme.ts']); expect((await resolvePromptReferences(directory, [{ path: 'src/theme.ts', label: 'src/theme.ts' }])).context).toContain('export const gap = 16;'); expect((await resolvePromptReferences(directory, [{ path: '.artifacts/canvases/demo.ui4a.tsx', label: 'Canvas · demo.ui4a.tsx' }])).context).toContain('demo.ui4a.tsx'); });
+test('rejects symlinked references that leave the workspace', async () => { directory = await mkdtemp('/tmp/artifacts-reference-'); const outside = await mkdtemp('/tmp/artifacts-outside-'); await writeFile(join(outside, 'secret.txt'), 'secret'); await symlink(join(outside, 'secret.txt'), join(directory, 'secret.txt')); await expect(resolvePromptReferences(directory, [{ path: 'secret.txt', label: 'secret.txt' }])).rejects.toThrow(); await rm(outside, { recursive: true, force: true }); });

@@ -1,3 +1,4 @@
+import type { PromptReference } from '../../../shared/prompt-references';
 import { memo, useCallback, useState, useSyncExternalStore } from 'react';
 import { useChat, type Chat } from '@ai-sdk/react';
 import type { ChatMessage, ConnectionCommand, SessionSummary } from '../../../shared/types';
@@ -23,7 +24,7 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   const chat = useChat<ChatMessage>({ chat: instance });
   const { viewport, content, stuck, scrollToBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
   const streaming = chat.status === 'submitted' || chat.status === 'streaming';
-  const send = useCallback((text: string) => { store.send(session.id, text); scrollToBottom('instant'); }, [scrollToBottom, session.id, store]);
+  const send = useCallback((text: string, references?: PromptReference[]) => { store.send(session.id, text, references); scrollToBottom('instant'); }, [scrollToBottom, session.id, store]);
   const openArtifact = useCallback((path: string) => store.openArtifact(session.id, path), [session.id, store]);
   const approve = useCallback((id: string, approved: boolean) => store.approve(session.id, id, approved), [session.id, store]);
   const answer = useCallback((id: string, response: QuestionResponse) => store.answer(session.id, id, response), [session.id, store]);
@@ -55,10 +56,11 @@ export function Conversation({ instance, session, store }: { instance: Chat<Chat
   </div>;
 }
 
-function SessionComposer({ store, sessionId, busy, disabled, onSend }: { store: WorkspaceStore; sessionId: string; busy: boolean; disabled: boolean; onSend: (text: string) => void }) {
+function SessionComposer({ store, sessionId, busy, disabled, onSend }: { store: WorkspaceStore; sessionId: string; busy: boolean; disabled: boolean; onSend: (text: string, references?: PromptReference[]) => void }) {
   const subscribe = useCallback((listener: () => void) => store.subscribeDraft(sessionId, listener), [store, sessionId]);
   const text = useSyncExternalStore(subscribe, () => store.draft(sessionId));
-  return <Composer text={text} setText={value => store.setDraft(sessionId, value)} disabled={disabled} busy={busy} onSend={onSend} onStop={() => void store.stop(sessionId).catch(store.fail)} />;
+  const searchReferences = useCallback((query: string) => store.searchReferences(sessionId, query), [sessionId, store]);
+  return <Composer text={text} setText={value => store.setDraft(sessionId, value)} disabled={disabled} busy={busy} searchReferences={searchReferences} onSend={onSend} onStop={() => void store.stop(sessionId).catch(store.fail)} />;
 }
 
 const Message = memo(function Message({ message, streaming, active, sessionId, cwd, onSend, onArtifact, onApprove, onAnswer, onConnectionCommand }: { message: ChatMessage; streaming: boolean; active: boolean; sessionId: string; cwd: string; onSend: (text: string) => void; onArtifact: (path: string) => void; onApprove: (id: string, approved: boolean) => Promise<unknown>; onAnswer: (id: string, response: QuestionResponse) => Promise<unknown>; onConnectionCommand: (id: string, command: ConnectionCommand) => Promise<unknown> }) {
@@ -77,6 +79,7 @@ const Message = memo(function Message({ message, streaming, active, sessionId, c
     if (!firstDelta.has(toolCallId)) firstDelta.set(toolCallId, index);
   }
   return <article data-message-role={message.role} className={message.role === 'user' ? 'theme-bubble max-w-[85%] self-end rounded-2xl px-4 py-2 text-sm' : 'flex flex-col gap-3'}>
+    {message.metadata?.references?.length ? <div className="flex flex-wrap gap-1 text-xs text-muted">{message.metadata.references.map(reference => <span key={reference.path} title={reference.path} className="rounded-full bg-surface-2 px-2 py-1">{reference.label}</span>)}</div> : null}
     {message.parts.map((part, index) => {
       if (groupReads && !streaming && isReadTool(part)) {
         const group = readRunAt(message.parts, index);
