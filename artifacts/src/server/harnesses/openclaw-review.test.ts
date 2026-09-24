@@ -18,12 +18,25 @@ test('non-continuable reviews are valid; malformed review cannot mean cleared', 
 });
 test('describe uses the closed upstream request schema and validates wrapper/key/generation', async () => {
   let args: unknown;
-  const client = { async request<T>(_method: string, params: unknown): Promise<T> { args = params; return { key, session: { key, sessionId: id, providerReview: review } } as T; } };
+  const client = { async request<T>(_method: string, params: unknown): Promise<T> { args = params; return { session: { key, sessionId: id, providerReview: review } } as T; } };
   expect((await describeProviderReview(client, { key, id })).review?.id).toBe(review.id);
   expect(args).toEqual({ key });
-  for (const response of [{}, { key, session: null }, { key, session: { key, sessionId: 'wrong' } }, { key: 'wrong', session: { key, sessionId: id } }]) {
+  for (const response of [{}, { session: null }, { session: {} }, { session: { key: 'wrong', sessionId: id } }, { session: { key, sessionId: 'wrong' } }]) {
     await expect(describeProviderReview({ async request<T>() { return response as T; } }, { key, id })).rejects.toThrow();
   }
+});
+test('describe handles ordinary rows without providerReview', async () => {
+  const client = { async request<T>(): Promise<T> { return { session: { key, sessionId: id } } as T; } };
+  const result = await describeProviderReview(client, { key, id });
+  expect(result.sessionId).toBe(id);
+  expect(result.review).toBeUndefined();
+});
+test('describe handles paused review rows', async () => {
+  const pausedReview = { ...review, id: 'review-2', runId: 'paused-run' };
+  const client = { async request<T>(): Promise<T> { return { session: { key, sessionId: id, providerReview: pausedReview } } as T; } };
+  const result = await describeProviderReview(client, { key, id });
+  expect(result.review?.canContinue).toBe(false);
+  expect(result.review?.explanation).toBe(review.explanation);
 });
 
 async function replay(mode: 'initial' | 'terminal-error' | 'terminal-end' | 'different-session' | 'different-generation') {
@@ -35,7 +48,7 @@ async function replay(mode: 'initial' | 'terminal-error' | 'terminal-end' | 'dif
       const request = JSON.parse(String(data)), { method, params = {} } = request; requests.push({ method, params });
       const reply = (payload: unknown) => ws.send(JSON.stringify({ type: 'res', id: request.id, ok: true, payload }));
       if (method === 'connect') reply({ type: 'hello-ok', protocol: 4, features: { methods: ['sessions.describe', 'sessions.subscribe', 'agent'] }, policy: { tickIntervalMs: 30000 } });
-      else if (method === 'sessions.describe') reply({ key, session: { key, sessionId: id, ...(pending ? { providerReview: review } : {}) } });
+      else if (method === 'sessions.describe') reply({ session: { key, sessionId: id, ...(pending ? { providerReview: review } : {}) } });
       else if (method === 'sessions.subscribe') reply({ ok: true });
       else if (method === 'agent') {
         reply({ runId: params.idempotencyKey, status: 'accepted' });

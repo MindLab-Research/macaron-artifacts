@@ -27,7 +27,8 @@ export function readProviderReview(value: unknown, session: Identity, controlBas
 export async function describeProviderReview(client: { request<T>(method: string, params: unknown, options?: { timeoutMs: number }): Promise<T> }, session: Identity, agentId?: string, controlBase?: string) {
   // expectedSessionId is NOT a sessions.describe parameter. Verify the returned generation.
   const response = record(await client.request('sessions.describe', { key: session.key, ...(agentId ? { agentId } : {}) }, { timeoutMs: 5000 }));
+  if (response.session == null) throw new Error('OpenClaw session identity could not be verified; review status was not cleared.');
   const row = record(response.session);
-  if (response.key !== session.key || row.key !== session.key || typeof row.sessionId !== 'string' || !row.sessionId || session.id && row.sessionId !== session.id) throw new Error('OpenClaw session identity could not be verified; review status was not cleared.');
+  if (row.key !== session.key || typeof row.sessionId !== 'string' || !row.sessionId || session.id && row.sessionId !== session.id) throw new Error('OpenClaw session identity could not be verified; review status was not cleared.');
   return { sessionId: row.sessionId, review: readProviderReview(row.providerReview, { key: session.key, id: row.sessionId }, controlBase) };
 }
