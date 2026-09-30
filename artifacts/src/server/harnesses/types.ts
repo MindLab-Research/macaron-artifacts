@@ -42,7 +42,7 @@ export interface HarnessTurn {
   onNativeSession: (id: string) => void;
   providerReview?: ProviderReview;
   onProviderReview?: (review: ProviderReview) => void;
-  approve: (request: Approval) => Promise<boolean>;
+  approve: (request: Approval, signal?: AbortSignal) => Promise<boolean>;
   ask: (request: Omit<QuestionRequest, 'id'>, signal?: AbortSignal) => Promise<QuestionResponse>;
   /**
    * Optional: only harnesses with a native connection protocol publish an operation. Adapters without

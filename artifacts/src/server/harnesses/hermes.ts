@@ -18,6 +18,21 @@ const connectionFor = (turn: Pick<HarnessTurn, 'cwd' | 'profile'>, token?: strin
   const rpc = new HermesRpc({ cwd: turn.cwd, binary: process.env.MACARON_HERMES_PATH || 'hermes', profile: profileName(turn.profile), token, url: gatewayUrl(turn.profile), secrets: token ? [token] : [], onFailure: () => { if (connections.get(key) === rpc) connections.delete(key); } });
   connections.set(key, rpc); return rpc;
 };
+function hermesQuestions(value: unknown) {
+  if (!Array.isArray(value) || !value.length) throw new Error('Hermes returned an empty clarify request');
+  return value.map(item => {
+    const question = record(item), id = string(question.qid), text = string(question.question), choices = Array.isArray(question.choices) ? question.choices.map(string).filter(Boolean) : [];
+    if (!id || !text) throw new Error('Hermes returned an invalid clarify question');
+    return { id, question: text, options: choices.map(label => ({ label })), multiple: question.multi_select === true, custom: choices.length === 0 };
+  });
+}
+// Hermes takes a lone single-select value bare and everything else as a JSON array.
+const encodeAnswer = (values: string[], multiple: boolean) => multiple || values.length !== 1 ? JSON.stringify(values) : values[0];
+function hermesAnswer(values: string[] | undefined, multiple = false) { return !values?.length ? '' : encodeAnswer(values, multiple); }
+function hermesAnswers(answers: Record<string, string[]>, questions: { id: string; multiple?: boolean }[]) {
+  const multiSelect = new Set(questions.filter(question => question.multiple).map(question => question.id));
+  return Object.fromEntries(Object.entries(answers).map(([id, values]) => [id, encodeAnswer(values, multiSelect.has(id))]));
+}
 export async function closeHermesConnections() { const values = [...connections.values()]; connections.clear(); await Promise.allSettled(values.map(value => value.close())); }
 
 function assertSupported(profile: HarnessTurn['profile']) {
@@ -62,9 +77,11 @@ export const hermesAdapter: HarnessAdapter = {
     const fail = (error: Error) => { closeConnections(); queue.fail(error); rejectDone(error); };
     type Tracked = { state: ConnectionState; browserId: string; owner: string; controls: ConnectionControls };
     const activeConnections = new Map<string, Tracked>();
+    const pendingServerRequests = new Map<string, AbortController>();
     const deadlines = new Set<ReturnType<typeof setTimeout>>();
     let turnClosed = false;
     let drainingPrevious = false, submittedMessageId = ref?.submittedMessageId;
+    let openRequests: unknown;
     const checkpoint = () => turn.onNativeSession(encode({ sessionId: nativeId, storedId, profile: profileName(turn.profile), ...(submittedMessageId ? { submittedMessageId } : {}) }));
     const submitPrompt = async () => {
       // Persist the identity before sending: a retry of an accepted but interrupted request must not duplicate it.
@@ -121,6 +138,45 @@ export const hermesAdapter: HarnessAdapter = {
       if (tracked) { tracked.state = state; publishConnection(tracked); }
       else openConnection(state, sid);
     };
+    // Own the request for its lifetime: track its abort controller, then reply once with the produced
+    // result or a redacted error. request.cancel and turn teardown abort the signal to suppress the reply.
+    const answerServerRequest = (id: string, produce: (signal: AbortSignal) => Promise<Record<string, unknown>>) => {
+      const controller = new AbortController(); pendingServerRequests.set(id, controller);
+      void produce(controller.signal)
+        .then(result => { if (!controller.signal.aborted) rpc.respond(id, result); })
+        .catch(error => { if (!controller.signal.aborted) rpc.respondError(id, -32603, safeError(error)); })
+        .finally(() => pendingServerRequests.delete(id));
+    };
+    // Cancellation reaches us as either a server request or a plain event; both just drop the reply.
+    const cancelServerRequest = (id: string) => { const controller = pendingServerRequests.get(id); if (!controller) return; pendingServerRequests.delete(id); controller.abort(); };
+    const unsubscribeServerRequests = rpc.onServerRequest(request => {
+      const sid = string(request.params.session_id);
+      if (!nativeId || sid !== nativeId) return false;
+      if (request.method === 'request.cancel') {
+        cancelServerRequest(string(request.params.request_id) || string(request.params.id));
+        rpc.respond(request.id, {});
+        return true;
+      }
+      if (request.method === 'clarify') {
+        answerServerRequest(request.id, async signal => {
+          // A batch request answers by question id; the single-question shape answers with one bare value.
+          const batch = Array.isArray(request.params.questions) && request.params.questions.length > 0;
+          const questions = hermesQuestions(batch ? request.params.questions : [{ qid: 'single', question: request.params.question, choices: request.params.choices, multi_select: request.params.multi_select }]);
+          const response = await turn.ask({ questions }, signal);
+          if (!('answers' in response)) return batch ? {} : { answer: '' };
+          return batch ? { answers: hermesAnswers(response.answers, questions) } : { answer: hermesAnswer(response.answers.single, questions[0]?.multiple) };
+        });
+        return true;
+      }
+      if (request.method === 'approval') {
+        answerServerRequest(request.id, async signal => {
+          const approved = await turn.approve({ id: string(request.params.request_id) || request.id, tool: string(request.params.tool_name) || 'terminal', input: request.params }, signal);
+          return { choice: approved ? 'once' : 'deny' };
+        });
+        return true;
+      }
+      return false;
+    });
     const unsub = rpc.onEvent(event => {
       const type = string(event.type), sid = string(event.session_id), payload = record(event.payload);
       if (type === 'connection.request' || type === 'connection.update') {
@@ -130,6 +186,7 @@ export const hermesAdapter: HarnessAdapter = {
         return;
       }
       if (nativeId && sid && sid !== nativeId) return;
+      if (type === 'request.cancel') { cancelServerRequest(string(payload.id) || string(payload.request_id)); return; }
       if (turn.enrichment && type === 'btw.complete') { metadataText += string(payload.text); if (metadataText) push([{ type: 'text-start', id: 'hermes-metadata' }, { type: 'text-delta', id: 'hermes-metadata', delta: metadataText }, { type: 'text-end', id: 'hermes-metadata' }]); done = true; queue.end(); resolveDone(); return; }
       if (turn.enrichment) return;
 
@@ -181,6 +238,7 @@ export const hermesAdapter: HarnessAdapter = {
           nativeId = string(resumed.session_id) || nativeId; storedId = storedId || string(resumed.stored_session_id) || nativeId;
           checkpoint();
           pending = normalizeConnection(resumed.pending_connection);
+          openRequests = resumed.open_requests;
         }
         if (turn.model) await rpc.request('config.set', { session_id: nativeId, key: 'model', value: `${turn.model} --session` }, turn.signal);
         if (turn.profile?.config.effort) await rpc.request('config.set', { session_id: nativeId, key: 'reasoning', value: `${turn.profile.config.effort} --session` }, turn.signal);
@@ -190,14 +248,14 @@ export const hermesAdapter: HarnessAdapter = {
         if (pending) openConnection(pending, nativeId);
         bindingSession = false;
         for (const event of earlyConnections.splice(0)) acceptConnection(event);
-        const attached = [...activeConnections.values()].some(tracked => connectionActionable(tracked.state));
+        const attached = rpc.replayOpenRequests(openRequests) > 0 || [...activeConnections.values()].some(tracked => connectionActionable(tracked.state));
         drainingPrevious = attached && (submittedMessageId ? submittedMessageId !== turn.messageId : !turn.retry);
         if (!attached) await submitPrompt();
       }
       yield* queue;
       await completed;
     } catch (error) { if (turn.signal.aborted) throw abortError(); throw new Error(safeError(error)); }
-    finally { turnClosed = true; for (const timer of deadlines) clearTimeout(timer); deadlines.clear(); activeConnections.clear(); turn.signal.removeEventListener('abort', abort); unsub(); }
+    finally { turnClosed = true; for (const controller of pendingServerRequests.values()) controller.abort(); pendingServerRequests.clear(); for (const timer of deadlines) clearTimeout(timer); deadlines.clear(); activeConnections.clear(); turn.signal.removeEventListener('abort', abort); unsub(); unsubscribeServerRequests(); }
   },
 };
 

@@ -2,6 +2,66 @@ import { describe, expect, test } from 'bun:test';
 import { closeHermesConnections, decodeHermesNativeId, encodeHermesNativeId } from './hermes.js';
 import { parseHermesReadyLine, rpcPayload } from './hermes-server.js';
 
+type FakeRequest = { jsonrpc?: string; id: number | string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown };
+interface FakeGateway {
+  connections: number;
+  closed: number;
+  readonly sent: FakeRequest[];
+  reply(request: FakeRequest, result: Record<string, unknown>): void;
+  replyError(request: FakeRequest, code: number, message: string): void;
+  event(type: string, payload: Record<string, unknown>, sessionId?: string): void;
+  serverRequest(id: string, method: string, params: Record<string, unknown>): void;
+  /** Deliver on a later turn, the way the real gateway never answers within the same send. */
+  soon(action: () => void): void;
+}
+type FakeRoute = (request: FakeRequest, gateway: FakeGateway) => void;
+
+/**
+ * In-process stand-in for the public `serve` gateway: it announces readiness, records every client frame
+ * and lets each test route the replies. Only one socket is live at a time, so frames go to the newest.
+ */
+function fakeGateway(route: FakeRoute) {
+  let current: FakeWebSocket | undefined;
+  const deliver = (frame: Record<string, unknown>) => current?.deliver(JSON.stringify(frame));
+  const gateway: FakeGateway = {
+    connections: 0,
+    closed: 0,
+    sent: [],
+    reply: (request, result) => deliver({ jsonrpc: '2.0', id: request.id, result }),
+    replyError: (request, code, message) => deliver({ jsonrpc: '2.0', id: request.id, error: { code, message } }),
+    event: (type, payload, sessionId) => deliver({ jsonrpc: '2.0', method: 'event', params: { type, ...(sessionId ? { session_id: sessionId } : {}), payload } }),
+    serverRequest: (id, method, params) => deliver({ jsonrpc: '2.0', id, method, params }),
+    soon: action => queueMicrotask(action),
+  };
+  class FakeWebSocket {
+    static OPEN = 1;
+    static CLOSING = 2;
+    readyState = 1;
+    private listeners = new Map<string, Set<(event: { data?: string }) => void>>();
+    constructor() { current = this; gateway.connections++; queueMicrotask(() => gateway.event('gateway.ready', {})); }
+    addEventListener(type: string, listener: (event: { data?: string }) => void) { let listeners = this.listeners.get(type); if (!listeners) this.listeners.set(type, listeners = new Set()); listeners.add(listener); }
+    send(raw: string) { const request = JSON.parse(raw) as FakeRequest; gateway.sent.push(request); route(request, gateway); }
+    close() { gateway.closed++; this.readyState = 3; }
+    deliver(raw: string) { for (const listener of this.listeners.get('message') ?? []) listener({ data: raw }); }
+  }
+  return { socket: FakeWebSocket, gateway };
+}
+
+/** Point the adapter at a fake gateway for one test, then restore the global socket and configured URL. */
+async function withFakeGateway(url: string, route: FakeRoute, run: (gateway: FakeGateway) => Promise<void>) {
+  const OriginalWebSocket = globalThis.WebSocket;
+  const originalUrl = process.env.MACARON_HERMES_URL;
+  const { socket, gateway } = fakeGateway(route);
+  (globalThis as unknown as { WebSocket: unknown }).WebSocket = socket;
+  process.env.MACARON_HERMES_URL = url;
+  try { await run(gateway); }
+  finally {
+    await closeHermesConnections();
+    globalThis.WebSocket = OriginalWebSocket;
+    if (originalUrl === undefined) delete process.env.MACARON_HERMES_URL; else process.env.MACARON_HERMES_URL = originalUrl;
+  }
+}
+
 describe('Hermes gateway adapter protocol helpers', () => {
   test('parses only the public serve readiness sentinel', () => {
     expect(parseHermesReadyLine('HERMES_BACKEND_READY port=43123')).toBe('ws://127.0.0.1:43123/api/ws');
@@ -20,41 +80,27 @@ describe('Hermes gateway adapter protocol helpers', () => {
   });
 
   test.each(['streamed', 'fallback', 'interleaved'] as const)('resumes the durable session and preserves %s reasoning boundaries', async mode => {
-    const OriginalWebSocket = globalThis.WebSocket;
-    const originalUrl = process.env.MACARON_HERMES_URL;
     const events: [string, Record<string, unknown>][] = mode === 'interleaved' ? [
       ['thinking.delta', { text: 'plan ' }], ['reasoning.delta', { text: 'first' }],
       ['tool.start', { tool_id: 'tool-1', name: 'read_file', args: {} }], ['tool.complete', { tool_id: 'tool-1', result: 'source' }],
       ['thinking.delta', { text: 'check ' }], ['message.delta', { text: '' }], ['reasoning.delta', { text: 'result' }],
       ['message.delta', { text: 'answer' }], ['message.complete', { text: 'answer' }],
     ] : [['thinking.delta', { text: 'plan' }], ...(mode === 'streamed' ? [['message.delta', { text: 'answer' }]] as [string, Record<string, unknown>][] : []), ['message.complete', { text: 'answer' }]];
-    let runtime = 0, connections = 0, closed = 0;
+    let runtime = 0;
     const resumes: Record<string, unknown>[] = [];
-    class FakeWebSocket {
-      static OPEN = 1;
-      static CLOSING = 2;
-      readyState = 1;
-      private listeners = new Map<string, Set<(event: { data?: string }) => void>>();
-      constructor() { connections++; queueMicrotask(() => this.emit('message', { data: JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: {} } }) })); }
-      addEventListener(type: string, listener: (event: { data?: string }) => void) { let listeners = this.listeners.get(type); if (!listeners) this.listeners.set(type, listeners = new Set()); listeners.add(listener); }
-      send(raw: string) {
-        const request = JSON.parse(raw) as { id: number; method: string; params: Record<string, unknown> }, reply = (result: Record<string, unknown>) => this.emit('message', { data: JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) });
-        if (request.method === 'session.create') { expect(request.params.cwd).toBe('/tmp'); runtime = 1; reply({ session_id: 'runtime-1', stored_session_id: 'stored-1' }); }
-        else if (request.method === 'session.resume') {
-          // Hermes rejects unknown resume fields; cwd is only accepted when creating a session.
-          const extra = Object.keys(request.params).find(key => !['session_id', 'omit_messages'].includes(key));
-          if (extra) { this.emit('message', { data: JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32602, message: `invalid params for session.resume: ${extra}: Extra inputs are not permitted` } }) }); return; }
-          resumes.push(request.params); runtime++; reply({ session_id: `runtime-${runtime}`, stored_session_id: 'stored-1' });
-        }
-        else if (request.method === 'prompt.submit') { reply({ status: 'streaming' }); queueMicrotask(() => { const sid = `runtime-${runtime}`; for (const [type, payload] of events) this.emit('message', { data: JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type, session_id: sid, payload } }) }); }); }
-        else reply({});
+    const route: FakeRoute = (request, gateway) => {
+      const params = request.params ?? {};
+      if (request.method === 'session.create') { expect(params.cwd).toBe('/tmp'); runtime = 1; gateway.reply(request, { session_id: 'runtime-1', stored_session_id: 'stored-1' }); }
+      else if (request.method === 'session.resume') {
+        // Hermes rejects unknown resume fields; cwd is only accepted when creating a session.
+        const extra = Object.keys(params).find(key => !['session_id', 'omit_messages'].includes(key));
+        if (extra) { gateway.replyError(request, -32602, `invalid params for session.resume: ${extra}: Extra inputs are not permitted`); return; }
+        resumes.push(params); runtime++; gateway.reply(request, { session_id: `runtime-${runtime}`, stored_session_id: 'stored-1' });
       }
-      close() { closed++; this.readyState = 3; }
-      private emit(type: string, event: { data?: string }) { for (const listener of this.listeners.get(type) ?? []) listener(event); }
-    }
-    (globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket;
-    process.env.MACARON_HERMES_URL = 'ws://hermes.test';
-    try {
+      else if (request.method === 'prompt.submit') { gateway.reply(request, { status: 'streaming' }); gateway.soon(() => { const sid = `runtime-${runtime}`; for (const [type, payload] of events) gateway.event(type, payload, sid); }); }
+      else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.test', route, async gateway => {
       const { hermesAdapter } = await import('./hermes.js');
       const base = { cwd: '/tmp', instructions: '', signal: new AbortController().signal, ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: (_id: string) => {} };
       let nativeId: string | undefined;
@@ -74,16 +120,97 @@ describe('Hermes gateway adapter protocol helpers', () => {
       expect(decodeHermesNativeId(nativeId!).sessionId).toBe('runtime-2');
       expect(resumed.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['answer']);
       await closeHermesConnections();
-      expect(closed).toBe(1);
+      expect(gateway.closed).toBe(1);
       const reconnected = await run('third');
-      expect(connections).toBe(2);
+      expect(gateway.connections).toBe(2);
       expect(resumes).toEqual([{ session_id: 'stored-1', omit_messages: true }, { session_id: 'stored-1', omit_messages: true }]);
       expect(decodeHermesNativeId(nativeId!)).toEqual({ sessionId: 'runtime-3', storedId: 'stored-1' });
       expect(reconnected.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['answer']);
-    } finally {
+    });
+  });
+
+  test('advertises server-request support and round-trips a clarify request', async () => {
+    let activeSession = 'runtime-1';
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: ['clarify'] });
+      else if (request.method === 'session.create') { activeSession = 'runtime-1'; gateway.reply(request, { session_id: activeSession, stored_session_id: 'stored-1' }); }
+      else if (request.method === 'session.resume') {
+        activeSession = 'runtime-2';
+        gateway.reply(request, { session_id: activeSession, stored_session_id: 'stored-1', open_requests: [{ id: 'srq-unknown', method: 'future.request', params: { session_id: activeSession } }, { id: 'srq-replay', method: 'clarify', params: { session_id: activeSession, question: 'Resume?', choices: ['North, America'], multi_select: true } }] });
+      }
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.serverRequest('srq-clarify', 'clarify', { session_id: activeSession, questions: [{ qid: 'q1', question: 'Continue?', choices: ['North, America', 'No'], multi_select: true }] }));
+      }
+      else if (request.id === 'srq-clarify') {
+        expect(request.method).toBeUndefined();
+        expect(request.params).toBeUndefined();
+        gateway.soon(() => gateway.event('message.complete', { text: 'done' }, activeSession));
+      }
+      else if (request.id === 'srq-replay') gateway.soon(() => gateway.event('message.complete', { text: 'resumed' }, activeSession));
+      else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      let nativeId = '';
+      const base = {
+        cwd: '/tmp', instructions: '', signal: new AbortController().signal,
+        ask: async (request: { questions: { id: string; question: string; options: { label: string }[]; multiple?: boolean; custom?: boolean }[] }) => {
+          if (request.questions[0]?.id === 'q1') expect(request.questions).toEqual([{ id: 'q1', question: 'Continue?', options: [{ label: 'North, America' }, { label: 'No' }], multiple: true, custom: false }]);
+          else expect(request.questions).toEqual([{ id: 'single', question: 'Resume?', options: [{ label: 'North, America' }], multiple: true, custom: false }]);
+          const answers: Record<string, string[]> = request.questions[0]?.id === 'q1' ? { q1: ['North, America'] } : { single: ['North, America'] };
+          return { answers };
+        },
+        approve: async () => true,
+        onNativeSession: (id: string) => { nativeId = id; },
+      };
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'ask me' })) chunks.push(chunk);
+      expect(gateway.sent.find(request => request.method === 'client.capabilities')).toMatchObject({ params: { server_requests: true } });
+      expect(gateway.sent.find(request => request.id === 'srq-clarify')).toEqual({ jsonrpc: '2.0', id: 'srq-clarify', result: { answers: { q1: '["North, America"]' } } });
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['done']);
+      const promptSubmitCount = gateway.sent.filter(request => request.method === 'prompt.submit').length;
+      for await (const chunk of hermesAdapter.run({ ...base, nativeId, prompt: 'resume me' })) chunks.push(chunk);
+      expect(gateway.sent.filter(request => request.method === 'prompt.submit')).toHaveLength(promptSubmitCount + 1);
+      expect(gateway.sent.find(request => request.id === 'srq-unknown')).toEqual({ jsonrpc: '2.0', id: 'srq-unknown', error: { code: -32601, message: 'no handler for server request: future.request' } });
+      expect(gateway.sent.find(request => request.id === 'srq-replay')).toEqual({ jsonrpc: '2.0', id: 'srq-replay', result: { answer: '["North, America"]' } });
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['done', 'done']);
       await closeHermesConnections();
-      globalThis.WebSocket = OriginalWebSocket;
-      if (originalUrl === undefined) delete process.env.MACARON_HERMES_URL; else process.env.MACARON_HERMES_URL = originalUrl;
-    }
+      expect(gateway.closed).toBe(1);
+    });
+  });
+
+  test('answers request.cancel and does not answer the cancelled server request', async () => {
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: ['clarify'] });
+      else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-cancel', stored_session_id: 'stored-cancel' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.serverRequest('srq-clarify-cancelled', 'clarify', { session_id: 'runtime-cancel', questions: [{ qid: 'q1', question: 'Continue?', choices: ['Yes'], multi_select: false }] }));
+        gateway.soon(() => gateway.serverRequest('srq-cancel', 'request.cancel', { session_id: 'runtime-cancel', request_id: 'srq-clarify-cancelled' }));
+      }
+      else if (request.id === 'srq-cancel') {
+        expect(request.method).toBeUndefined();
+        gateway.soon(() => gateway.event('message.complete', { text: 'cancelled' }, 'runtime-cancel'));
+      }
+      else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.cancel.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const base = {
+        cwd: '/tmp', instructions: '', signal: new AbortController().signal,
+        ask: async (_request: unknown, signal?: AbortSignal) => {
+          if (!signal) throw new Error('cancel smoke did not receive a request signal');
+          return new Promise<{ cancelled: true }>(resolve => signal.addEventListener('abort', () => resolve({ cancelled: true }), { once: true }));
+        },
+        approve: async () => true,
+        onNativeSession: (_id: string) => {},
+      };
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'ask then cancel' })) chunks.push(chunk);
+      expect(gateway.sent.find(request => request.id === 'srq-cancel')).toEqual({ jsonrpc: '2.0', id: 'srq-cancel', result: {} });
+      expect(gateway.sent.some(request => request.id === 'srq-clarify-cancelled')).toBe(false);
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['cancelled']);
+    });
   });
 });
