@@ -128,8 +128,8 @@ importers:
         specifier: 1.18.29
         version: 1.18.29
       '@opencode/client':
-        specifier: 2.0.13
-        version: 2.0.13(effect@4.0.0-rc.112)
+        specifier: 2.0.20
+        version: 2.0.20(effect@4.0.0-rc.112)
       ai:
         specifier: 7.0.93
         version: 7.0.93(zod@4.4.3)
@@ -174,8 +174,8 @@ importers:
         specifier: 1.18.29
         version: 1.18.29
       '@opencode/client':
-        specifier: 2.0.13
-        version: 2.0.13(effect@4.0.0-rc.112)
+        specifier: 2.0.20
+        version: 2.0.20(effect@4.0.0-rc.112)
       '@shikijs/langs':
         specifier: 4.4.3
         version: 4.4.3
@@ -1110,8 +1110,8 @@ packages:
   '@opencode-ai/sdk@1.18.29':
     resolution: {integrity: sha512-4CS+FoLPkymTlcga8jxivGDDb2AbWMIIl3b8+myoe2wtv/1ANYCErslgz1xy5hTVHymWE6CtVNKzRuPU0ED57A==}
 
-  '@opencode/client@2.0.13':
-    resolution: {integrity: sha512-eNUH3BB0sy/BBz26B7cqbpGPsMnjYQbx+LIYjjEgmq1aDosntbaUhju8cTD0GGwftD7e+R++XKDOwCnkXkNGJg==}
+  '@opencode/client@2.0.20':
+    resolution: {integrity: sha512-gTwZCVv7tNwOLPZXZyUDF9tZnEsKuchkjXv1l98I+sTWJJNRqsEM5wnvjlOJEiwiqWZTeBk1UIk2QpR5PDGzwA==}
     peerDependencies:
       effect: 4.0.0-rc.112
       solid-js: '>=1.9.0'
@@ -1121,11 +1121,11 @@ packages:
       solid-js:
         optional: true
 
-  '@opencode/protocol@2.0.13':
-    resolution: {integrity: sha512-Qzh/cuMF0hBKWz+XKUoh+FgyU/p9MK84SKAoqmAKRWrDKC+1+zNoHOB9urZ+TBDerw2Nrl8id8UBMWuTmGhrCQ==}
+  '@opencode/protocol@2.0.20':
+    resolution: {integrity: sha512-5tN25fwpc/2blCFpZgl9fkU92diHAVuk88TGxHH1LO27Ib/lJFWBxTvMUImrCmbyBv70f8W8MMkjkFhA5ryWVA==}
 
-  '@opencode/schema@2.0.13':
-    resolution: {integrity: sha512-jdfjPMnu9uFRKQ6Sx92nu1CQ/FkqbOLhh3CG6VPlKUzyvOoUB0N2jJ8NOePlbmkaudkY8jNtwekhWzZSRql63Q==}
+  '@opencode/schema@2.0.20':
+    resolution: {integrity: sha512-rutVd9rYHa/WTZA3glLQY3pbMN/SZ6Q4yd8XrpRtbGN+2u3fukz4mTXy8QQY1mVSabdX5jYTmzPi0QJMpmGSUQ==}
 
   '@oxc-parser/binding-android-arm-eabi@0.131.0':
     resolution: {integrity: sha512-t2xicr9pfzkSRYx5aPqZqlLaayIwJTqgQ81Jor31Xep2nGyL2Aq3d0K5wOfeR7VevaSdxaS9dzSQP9xDwn8fDg==}
@@ -4595,19 +4595,19 @@ snapshots:
     dependencies:
       cross-spawn: 7.0.6
 
-  '@opencode/client@2.0.13(effect@4.0.0-rc.112)':
+  '@opencode/client@2.0.20(effect@4.0.0-rc.112)':
     dependencies:
-      '@opencode/protocol': 2.0.13
-      '@opencode/schema': 2.0.13
+      '@opencode/protocol': 2.0.20
+      '@opencode/schema': 2.0.20
     optionalDependencies:
       effect: 4.0.0-rc.112
 
-  '@opencode/protocol@2.0.13':
+  '@opencode/protocol@2.0.20':
     dependencies:
-      '@opencode/schema': 2.0.13
+      '@opencode/schema': 2.0.20
       effect: 4.0.0-rc.112
 
-  '@opencode/schema@2.0.13':
+  '@opencode/schema@2.0.20':
     dependencies:
       '@standard-schema/spec': 1.1.0
       effect: 4.0.0-rc.112

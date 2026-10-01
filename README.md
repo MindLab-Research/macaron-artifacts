@@ -85,7 +85,7 @@ CLI options override their environment variables.
 | `MACARON_OPENCODE_V2_PATH` | OpenCode v2 executable (default `opencode2`, then a major-checked `opencode`) |
 | `PI_CODING_AGENT_DIR` | pi configuration directory, default `~/.pi/agent` |
 
-OpenCode v1 and v2 appear side by side in **New conversation** and **Profiles**. Existing `opencode` sessions and Profiles remain v1; `opencode-v2` is independent. Each executable is major-checked before startup, so selecting the wrong generation fails immediately with the relevant environment variable. Native configuration and credentials remain untouched. The adapters pin `@opencode-ai/sdk@1.18.29` for v1 (its `/v2/client` export is not native v2) and `@opencode/client@2.0.13` for native v2.
+OpenCode v1 and v2 appear side by side in **New conversation** and **Profiles**. Existing `opencode` sessions and Profiles remain v1; `opencode-v2` is independent. Each executable is major-checked before startup, so selecting the wrong generation fails immediately with the relevant environment variable. Native configuration and credentials remain untouched. The adapters pin `@opencode-ai/sdk@1.18.29` for v1 (its `/v2/client` export is not native v2) and `@opencode/client@2.0.20` for native v2.
 
 Open **Profiles** in the sidebar to configure models, reasoning effort, service endpoints and credentials. Codex Profiles use its native `$CODEX_HOME/<name>.config.toml` files (current Codex CLI); Claude Code, OpenCode and pi use app-managed overrides. API keys and tokens are stored in a private local file under the data directory and are never returned to the browser. See [Profiles](artifacts/README.md#profiles) for supported settings and inheritance.
 

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { FormInfo1, FormAnswer1 } from '@opencode/client';
+import type { FormInfo1, FormAnswer2 } from '@opencode/client';
 import type { ChatChunk } from '../../shared/types.js';
 import type { Question } from '../../shared/questions.js';
 import type { HarnessAdapter, HarnessTurn } from './types.js';
@@ -22,7 +22,7 @@ export function openCodeV2Questions(form: FormInfo1): Question[] {
   });
 }
 
-export function openCodeV2Answers(form: FormInfo1, answers: Record<string, string[]>): FormAnswer1 {
+export function openCodeV2Answers(form: FormInfo1, answers: Record<string, string[]>): FormAnswer2 {
   return Object.fromEntries(form.fields.map(field => {
     const selected = answers[field.key];
     if (!selected?.length) throw new Error(`Missing answer for ${field.key}`);
