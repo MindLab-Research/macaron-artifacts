@@ -416,4 +416,30 @@ describe('persistent session chat connections', () => {
     expect(store.chat('first')).toBe(originalChat);
     expect(originalChat?.messages.at(-1)?.parts.find(part => part.type === 'text')).toEqual({ type: 'text', text: 'before after', state: 'done' });
   });
+
+  test('failed removal does not strand a completed resume operation', async () => {
+    const first = { ...session('first'), status: 'running' as const };
+    const turns: ReadableStreamDefaultController<Uint8Array>[] = [];
+    let releaseDelete!: (response: Response) => void;
+    const encode = (chunk: ChatChunk) => new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`);
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/harnesses') return Response.json([]);
+      if (path === '/api/sessions') return Response.json([first]);
+      if (path.endsWith('/artifacts')) return Response.json([]);
+      if (path === '/api/chat' || path.endsWith('/stream')) return new Response(new ReadableStream({ start(controller) { turns.push(controller); } }), { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } });
+      if (path === '/api/sessions/first' && init?.method === 'DELETE') return new Promise<Response>(resolve => { releaseDelete = resolve; });
+      return Response.json(first);
+    }) as typeof fetch;
+    const store = new WorkspaceStore();
+    await store.initialize();
+    for (let i = 0; i < 10 && turns.length < 1; i++) await tick();
+    expect(turns).toHaveLength(1);
+    const removing = store.remove('first'); await tick();
+    turns[0].enqueue(encode({ type: 'start', messageId: 'answer' })); turns[0].enqueue(encode({ type: 'finish' })); turns[0].close(); await tick();
+    releaseDelete(Response.json({ error: 'delete failed' }, { status: 500 })); await removing;
+    store.resume('first'); await tick();
+    expect(turns).toHaveLength(2);
+    turns[1].enqueue(encode({ type: 'start', messageId: 'retry' })); turns[1].enqueue(encode({ type: 'finish' })); turns[1].close(); await tick();
+  });
 });

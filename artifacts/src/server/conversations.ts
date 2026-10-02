@@ -11,6 +11,8 @@ import { ArtifactObserver } from './artifacts.js';
 import { MetadataTasks } from './enrichment.js';
 import { SessionStore } from './store.js';
 
+const isTransientChunk = (chunk: ChatChunk) => (chunk as { transient?: boolean }).transient === true;
+
 /**
  * A saved transcript keeps what happened, never a replayable authorization link or credential default,
  * and never controls: the native process that owned them is gone by the time this is read back.
@@ -70,7 +72,9 @@ export class ActiveConversation {
   }
   private cancelQuestions() { for (const pending of this.questions.values()) pending.resolve({ cancelled: true }); }
   private publish(chunk: ChatChunk) {
-    this.journal.push(chunk);
+    // Transient data parts are live UI signals, not transcript state. Replaying them after a
+    // reconnect would duplicate keyless toasts and restart TTLs that may already have expired.
+    if (!isTransientChunk(chunk)) this.journal.push(chunk);
     for (const listener of this.listeners) { try { listener.enqueue(chunk); } catch { this.listeners.delete(listener); } }
   }
   private async execute(prompt: string) {
@@ -174,7 +178,7 @@ export class ActiveConversation {
           const { value, done } = await reader.read();
           if (done) break;
           // Live subscribers get the real authorization link; disk keeps only the safe historical summary.
-          if (!diskError) disk.write(`${JSON.stringify(value.type === 'data-connection' ? { ...value, data: { ...redactConnection(value.data), actionable: false } } : value)}\n`);
+          if (!diskError && !isTransientChunk(value)) disk.write(`${JSON.stringify(value.type === 'data-connection' ? { ...value, data: { ...redactConnection(value.data), actionable: false } } : value)}\n`);
           this.publish(value);
         }
       } finally { reader.releaseLock(); }

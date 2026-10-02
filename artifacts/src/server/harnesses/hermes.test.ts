@@ -213,4 +213,39 @@ describe('Hermes gateway adapter protocol helpers', () => {
       expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['cancelled']);
     });
   });
+
+  test('forwards Hermes notification show and clear events as transient data chunks', async () => {
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'session.create') {
+        gateway.event('notification.show', {
+          text: 'External memory is unavailable', level: 'warn', kind: 'sticky', ttl_ms: null,
+          key: 'startup-warning.external-memory', id: 'notice-1',
+        }, 'runtime-notice');
+        gateway.reply(request, { session_id: 'runtime-notice', stored_session_id: 'stored-notice' });
+      }
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => {
+          gateway.event('notification.clear', { key: 'startup-warning.external-memory' }, 'runtime-notice');
+          gateway.event('message.complete', { text: 'ready' }, 'runtime-notice');
+          gateway.soon(() => gateway.event('notification.clear', { key: 'startup-warning.external-memory' }, 'runtime-notice'));
+        });
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.notifications.test', route, async () => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const base = { cwd: '/tmp', instructions: '', signal: new AbortController().signal, ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: (_id: string) => {} };
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'show startup notice' })) chunks.push(chunk);
+      expect(chunks).toContainEqual({
+        type: 'data-notification', id: 'hermes-notification:notice-1', transient: true,
+        data: { action: 'show', text: 'External memory is unavailable', level: 'warn', kind: 'sticky', ttl_ms: null, key: 'startup-warning.external-memory', id: 'notice-1' },
+      });
+      expect(chunks).toContainEqual({
+        type: 'data-notification', id: 'hermes-notification-clear:startup-warning.external-memory', transient: true,
+        data: { action: 'clear', key: 'startup-warning.external-memory' },
+      });
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['ready']);
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import { Chat } from '@ai-sdk/react';
 import { DefaultChatTransport, type DataUIPart } from 'ai';
 import type { Artifact, ChatMessage, ConnectionCommand, ConnectionView, HarnessId, HarnessInfo, MessageData, ProviderReview, Session, SessionSummary } from '../../shared/types';
+import { toast } from 'sonner';
 import type { QuestionResponse } from '../../shared/questions';
 import { consumeMetadata } from './metadata';
 import { artifactEntryPath } from '../../shared/artifact-path';
@@ -42,7 +43,29 @@ export class WorkspaceStore {
   private selectedArtifacts = new Map<string, string>();
   private seenArtifactStreams = new Map<string, Set<string>>();
   private dismissed = new Map<string, string>();
+  private notificationToasts = new Map<string, string>();
+  private notificationToastIds = new Map<string, Set<string>>();
+  private notificationToastKey = (sessionId: string, key: string) => `${sessionId}\0${key}`;
+  private sessionGenerations = new Map<string, number>();
+  private removingSessions = new Set<string>();
   private disposed = false;
+  private forgetNotificationToast(sessionId: string, toastId: string) {
+    const toastIds = this.notificationToastIds.get(sessionId);
+    toastIds?.delete(toastId);
+    if (toastIds && !toastIds.size) this.notificationToastIds.delete(sessionId);
+    for (const [mapKey, mappedId] of this.notificationToasts) if (mappedId === toastId && mapKey.startsWith(`${sessionId}\0`)) this.notificationToasts.delete(mapKey);
+  }
+  private sessionGeneration = (id: string) => this.sessionGenerations.get(id) ?? 0;
+  private isCurrentSession = (id: string, generation: number) => !this.disposed && !this.removingSessions.has(id) && this.sessionGeneration(id) === generation;
+  private dismissNotificationToast(sessionId: string, mapKey: string, toastId: string) {
+    toast.dismiss(toastId); this.forgetNotificationToast(sessionId, toastId);
+    if (this.notificationToasts.get(mapKey) === toastId) this.notificationToasts.delete(mapKey);
+  }
+  private dismissNotificationSession(sessionId: string) {
+    for (const toastId of this.notificationToastIds.get(sessionId) ?? []) toast.dismiss(toastId);
+    for (const toastId of [...this.notificationToastIds.get(sessionId) ?? []]) this.forgetNotificationToast(sessionId, toastId);
+    for (const [mapKey, toastId] of this.notificationToasts) if (mapKey.startsWith(`${sessionId}\0`)) { toast.dismiss(toastId); this.notificationToasts.delete(mapKey); }
+  }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.snapshot;
   private publish(patch: Partial<WorkspaceSnapshot> = {}) { if (this.disposed) return; this.snapshot = { ...this.snapshot, ...patch, revision: this.snapshot.revision + 1 }; for (const listener of this.listeners) listener(); }
@@ -68,6 +91,9 @@ export class WorkspaceStore {
     this.disposed = true; this.queues.clear(); this.listeners.clear(); this.draftListeners.clear();
     for (const controller of this.metadata.values()) controller.abort();
     this.metadata.clear();
+    for (const toastIds of this.notificationToastIds.values()) for (const toastId of toastIds) toast.dismiss(toastId);
+    this.notificationToasts.clear();
+    this.notificationToastIds.clear(); this.removingSessions.clear();
     // This only detaches browser streams. Native turns survive logout and can be resumed after login.
     for (const chat of this.chats.values()) void chat.stop();
   };
@@ -86,10 +112,11 @@ export class WorkspaceStore {
 
   select = async (id: string) => {
     if (this.disposed) return;
+    const generation = this.sessionGeneration(id);
     remember(ACTIVE_KEY, id);
     this.publish({ activeId: id, loading: !this.chats.has(id), error: undefined });
-    try { await this.load(id); } catch (error) { this.fail(error); }
-    finally { if (this.snapshot.activeId === id) this.publish({ loading: false }); }
+    try { await this.load(id); } catch (error) { if (this.isCurrentSession(id, generation)) this.fail(error); }
+    finally { if (this.isCurrentSession(id, generation) && this.snapshot.activeId === id) this.publish({ loading: false }); }
   };
 
   private load(id: string): Promise<Chat<ChatMessage>> {
@@ -98,19 +125,20 @@ export class WorkspaceStore {
     const pending = this.loads.get(id);
     if (pending) return pending;
     const configuration = this.configurationRevisions.get(id);
+    const generation = this.sessionGenerations.get(id) ?? 0;
     const task = Promise.all([api<Session>(`/api/sessions/${id}`), api<Artifact[]>(`/api/sessions/${id}/artifacts`)]).then(([session, artifacts]) => {
-      if (this.disposed) throw new DOMException('Workspace detached', 'AbortError');
+      if (!this.isCurrentSession(id, generation)) throw new DOMException('Workspace detached', 'AbortError');
       this.files.set(id, new Map(artifacts.map(artifact => [artifact.path, artifact])));
       const chat = new Chat<ChatMessage>({
         id, messages: session.messages,
         transport: new DefaultChatTransport<ChatMessage>({ api: apiUrl('/api/chat'), fetch: authenticatedFetch as typeof fetch, headers: connectionHeaders(), prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, messages }, headers: connectionHeaders() }) }),
-        onData: part => this.onData(id, part),
-        onError: error => this.update(id, { status: 'error', error: error.message }),
+        onData: part => this.onData(id, generation, part),
+        onError: error => { if (this.isCurrentSession(id, generation)) this.update(id, { status: 'error', error: error.message }); },
         onFinish: ({ isError, isDisconnect }) => {
-          if (this.disposed) return;
+          if (!this.isCurrentSession(id, generation)) return;
           if (!isError && !isDisconnect) this.update(id, { status: 'idle', error: undefined });
           const turn = this.turns.get(id);
-          void this.refresh(id, turn, isError || isDisconnect).then(() => { if (!isError && !isDisconnect && this.turns.get(id) === turn) void this.subscribeMetadata(id); });
+          void this.refresh(id, turn, isError || isDisconnect, generation).then(() => { if (!isError && !isDisconnect && this.isCurrentSession(id, generation) && this.turns.get(id) === turn) void this.subscribeMetadata(id); });
         },
       });
       this.chats.set(id, chat);
@@ -126,9 +154,31 @@ export class WorkspaceStore {
     return task;
   }
 
-  private onData(id: string, part: DataUIPart<MessageData>) {
-    if (this.disposed) return;
+  private onData(id: string, generation: number, part: DataUIPart<MessageData>) {
+    if (!this.isCurrentSession(id, generation)) return;
     if (part.type === 'data-providerReview') this.update(id, { providerReview: part.data });
+    if (part.type === 'data-notification') {
+      if (part.data.action === 'clear') {
+        const mapKey = this.notificationToastKey(id, part.data.key);
+        const toastId = this.notificationToasts.get(mapKey);
+        if (toastId) this.dismissNotificationToast(id, mapKey, toastId);
+        this.notificationToasts.delete(mapKey);
+      } else {
+        const mapKey = part.data.key ? this.notificationToastKey(id, part.data.key) : undefined;
+        const toastId = mapKey ?? (part.data.id ? `${id}\0${part.data.id}` : randomUUID());
+        const duration = part.data.kind === 'sticky' || part.data.kind === 'agent' ? Infinity : part.data.kind === 'ttl' && typeof part.data.ttl_ms === 'number' && Number.isFinite(part.data.ttl_ms) ? Math.max(1, part.data.ttl_ms) : undefined;
+        const forget = () => this.forgetNotificationToast(id, toastId);
+        const options = { id: toastId, duration, onDismiss: forget, onAutoClose: forget };
+        if (part.data.level === 'error') toast.error(part.data.text, options);
+        else if (part.data.level === 'warn') toast.warning(part.data.text, options);
+        else if (part.data.level === 'success') toast.success(part.data.text, options);
+        else toast.info(part.data.text, options);
+        let toastIds = this.notificationToastIds.get(id);
+        if (!toastIds) this.notificationToastIds.set(id, toastIds = new Set());
+        toastIds.add(toastId);
+        if (mapKey) this.notificationToasts.set(mapKey, toastId);
+      }
+    }
     if (part.type === 'data-artifact') {
       let files = this.files.get(id);
       if (!files) this.files.set(id, files = new Map());
@@ -152,12 +202,12 @@ export class WorkspaceStore {
     if (part.type === 'data-recap') this.update(id, { ...(part.data.title ? { title: part.data.title } : {}), suggestions: part.data.suggestions });
   }
 
-  private async refresh(id: string, turn = this.turns.get(id), restoreMessages = false) {
-    if (this.disposed) return;
+  private async refresh(id: string, turn = this.turns.get(id), restoreMessages = false, generation = this.sessionGeneration(id)) {
+    if (!this.isCurrentSession(id, generation)) return;
     const configuration = this.configurationRevisions.get(id);
     try {
       const { messages, ...summary } = await api<Session>(`/api/sessions/${id}`);
-      if (this.turns.get(id) !== turn || this.configurationRevisions.get(id) !== configuration) return;
+      if (!this.isCurrentSession(id, generation) || this.turns.get(id) !== turn || this.configurationRevisions.get(id) !== configuration) return;
       const chat = this.chats.get(id);
       const streaming = chat?.status === 'streaming' || chat?.status === 'submitted';
       const lastUser = chat?.messages.findLast(message => message.role === 'user');
@@ -168,7 +218,7 @@ export class WorkspaceStore {
         if (summary.status === 'idle') chat.clearError();
       }
       this.update(id, { ...summary, model: summary.model, profileId: summary.profileId, ...(streaming ? { status: 'running' } : unacknowledged ? { status: 'error', error: chat?.error?.message ?? '这条消息尚未发送成功。' } : {}) });
-    } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }
+    } catch (error) { if (this.isCurrentSession(id, generation) && this.turns.get(id) === turn) this.fail(error); }
   }
 
   private cancelMetadata(id: string) { this.metadata.get(id)?.abort(); this.metadata.delete(id); }
@@ -203,7 +253,22 @@ export class WorkspaceStore {
     this.cancelMetadata(id); this.update(id, { ...summary, model: summary.model, profileId: summary.profileId });
   };
   remove = async (id: string) => {
-    await api(`/api/sessions/${id}`, { method: 'DELETE' });
+    if (this.removingSessions.has(id)) return;
+    this.removingSessions.add(id);
+    try { await api(`/api/sessions/${id}`, { method: 'DELETE' }); }
+    catch (error) {
+      this.removingSessions.delete(id);
+      if (!this.disposed) {
+        if (!this.loads.has(id) && this.snapshot.activeId === id) this.publish({ loading: false });
+        this.fail(error);
+      }
+      return;
+    }
+    this.sessionGenerations.set(id, this.sessionGeneration(id) + 1);
+    this.removingSessions.delete(id);
+    this.inflight.delete(id);
+    this.loads.delete(id);
+    this.dismissNotificationSession(id);
     this.cancelMetadata(id); this.turns.delete(id); this.configurationRevisions.delete(id); this.setDraft(id, '');
     this.chats.delete(id); this.files.delete(id); this.liveRevisions.delete(id); this.queues.delete(id); this.selectedArtifacts.delete(id); this.seenArtifactStreams.delete(id); this.dismissed.delete(id);
     const sessions = this.snapshot.sessions.filter(session => session.id !== id);
@@ -242,17 +307,28 @@ export class WorkspaceStore {
     finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
   }
   resume = async (id: string) => {
-    if (this.disposed) return;
+    if (this.disposed || this.removingSessions.has(id)) return;
+    const generation = this.sessionGeneration(id);
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id)) return;
     const turn = this.turns.get(id);
     this.inflight.add(id);
     this.liveRevisions.delete(id);
-    try { chat.clearError(); await chat.resumeStream(); } catch (error) { this.fail(error); }
-    finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); await this.refresh(id, turn, true); void this.drain(id); } }
+    try { chat.clearError(); await chat.resumeStream(); }
+    catch (error) { if (this.isCurrentSession(id, generation)) this.fail(error); }
+    finally {
+      if (this.turns.get(id) === turn) {
+        this.inflight.delete(id);
+        if (this.isCurrentSession(id, generation)) {
+          await this.refresh(id, turn, true, generation);
+          void this.drain(id);
+        }
+      }
+    }
   };
   retry = async (id: string) => {
-    if (this.disposed) return;
+    if (this.disposed || this.removingSessions.has(id)) return;
+    const generation = this.sessionGeneration(id);
     if (this.snapshot.sessions.find(session => session.id === id)?.providerReview) return;
     const chat = this.chats.get(id);
     if (!chat || this.inflight.has(id) || chat.status === 'streaming' || chat.status === 'submitted') return;
@@ -263,7 +339,7 @@ export class WorkspaceStore {
     this.liveRevisions.delete(id);
     try {
       const remote = await api<Session>(`/api/sessions/${id}`);
-      if (this.disposed || this.turns.get(id) !== turn) return;
+      if (!this.isCurrentSession(id, generation) || this.turns.get(id) !== turn) return;
       if (remote.providerReview) { this.update(id, { providerReview: remote.providerReview }); return; }
       const lastUser = chat.messages.findLast(message => message.role === 'user');
       if (lastUser && !remote.messages.some(message => message.id === lastUser.id)) {
@@ -274,14 +350,22 @@ export class WorkspaceStore {
         // No argument replays the same message id and intent; appending "continue" would lose a request the server never received.
         await chat.sendMessage();
       } else if (remote.status === 'running') {
-        chat.clearError(); await chat.resumeStream(); await this.refresh(id, turn, true);
+        chat.clearError(); await chat.resumeStream(); await this.refresh(id, turn, true, generation);
       } else {
         chat.messages = remote.messages; chat.clearError();
         if (remote.status === 'error') { this.seenArtifactStreams.delete(id); this.update(id, { status: 'running', suggestions: [], error: undefined }); await chat.sendMessage(); }
         else { const { messages: _messages, ...summary } = remote; this.update(id, summary); void this.subscribeMetadata(id); }
       }
-    } catch (error) { if (this.turns.get(id) === turn) this.fail(error); }
-    finally { if (this.turns.get(id) === turn) { this.inflight.delete(id); this.publish(); if (chat.status !== 'error') void this.drain(id); } }
+    } catch (error) { if (this.isCurrentSession(id, generation) && this.turns.get(id) === turn) this.fail(error); }
+    finally {
+      if (this.turns.get(id) === turn) {
+        this.inflight.delete(id);
+        if (this.isCurrentSession(id, generation)) {
+          this.publish();
+          if (chat.status !== 'error') void this.drain(id);
+        }
+      }
+    }
   };
   stop = async (id: string) => {
     // Cancellation is an explicit server action. Aborting a browser stream alone must never kill the harness.

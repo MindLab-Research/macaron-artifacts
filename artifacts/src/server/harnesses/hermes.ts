@@ -80,6 +80,12 @@ export const hermesAdapter: HarnessAdapter = {
     const pendingServerRequests = new Map<string, AbortController>();
     const deadlines = new Set<ReturnType<typeof setTimeout>>();
     let turnClosed = false;
+    const delayedQueueEnds = new Set<ReturnType<typeof setTimeout>>();
+    const endQueueSoon = () => {
+      if (delayedQueueEnds.size) return;
+      const timer = setTimeout(() => { delayedQueueEnds.delete(timer); queue.end(); }, 0);
+      delayedQueueEnds.add(timer);
+    };
     let drainingPrevious = false, submittedMessageId = ref?.submittedMessageId;
     let openRequests: unknown;
     const checkpoint = () => turn.onNativeSession(encode({ sessionId: nativeId, storedId, profile: profileName(turn.profile), ...(submittedMessageId ? { submittedMessageId } : {}) }));
@@ -90,6 +96,34 @@ export const hermesAdapter: HarnessAdapter = {
     };
     let bindingSession = true;
     const earlyConnections: Record<string, unknown>[] = [];
+    const earlyNotifications: { type: 'notification.show' | 'notification.clear'; sessionId: string; payload: Record<string, unknown> }[] = [];
+    let notificationSequence = 0;
+    const publishNotification = (type: 'notification.show' | 'notification.clear', payload: Record<string, unknown>) => {
+      if (type === 'notification.show') {
+        const text = string(payload.text), level = string(payload.level), kind = string(payload.kind);
+        if (!text || !level || !kind) return;
+        const data: Extract<ChatChunk, { type: 'data-notification' }>['data'] = { action: 'show', text, level, kind };
+        if (payload.ttl_ms === null || typeof payload.ttl_ms === 'number') data.ttl_ms = payload.ttl_ms;
+        if (typeof payload.key === 'string') data.key = payload.key;
+        if (typeof payload.id === 'string') data.id = payload.id;
+        const identity = data.id || data.key || `event-${++notificationSequence}`;
+        push([{ type: 'data-notification', id: `hermes-notification:${identity}`, data, transient: true }]);
+      } else {
+        const key = string(payload.key);
+        if (key) push([{ type: 'data-notification', id: `hermes-notification-clear:${key}`, data: { action: 'clear', key }, transient: true }]);
+      }
+    };
+    const receiveNotification = (event: { type: 'notification.show' | 'notification.clear'; sessionId: string; payload: Record<string, unknown> }) => {
+      if (bindingSession || !nativeId) {
+        if (earlyNotifications.length < 100) earlyNotifications.push(event);
+        return;
+      }
+      if (event.sessionId && event.sessionId !== nativeId) return;
+      publishNotification(event.type, event.payload);
+    };
+    const flushEarlyNotifications = () => {
+      for (const event of earlyNotifications.splice(0)) if (!event.sessionId || event.sessionId === nativeId) publishNotification(event.type, event.payload);
+    };
     const publishConnection = (tracked: Tracked) => {
       const actionable = !turnClosed && !turn.signal.aborted && connectionActionable(tracked.state);
       // Re-register on every snapshot so the API validates answers against what the browser last saw.
@@ -186,8 +220,16 @@ export const hermesAdapter: HarnessAdapter = {
         return;
       }
       if (nativeId && sid && sid !== nativeId) return;
+      if (type === 'notification.show' || type === 'notification.clear') {
+        receiveNotification({ type, sessionId: sid, payload });
+        return;
+      }
+      // Once the native turn has completed, only notification events may still be
+      // delivered during the one-macrotask queue-end grace period. Do not let a
+      // late error/delta reopen or fail an already completed browser turn.
+      if (done) return;
       if (type === 'request.cancel') { cancelServerRequest(string(payload.id) || string(payload.request_id)); return; }
-      if (turn.enrichment && type === 'btw.complete') { metadataText += string(payload.text); if (metadataText) push([{ type: 'text-start', id: 'hermes-metadata' }, { type: 'text-delta', id: 'hermes-metadata', delta: metadataText }, { type: 'text-end', id: 'hermes-metadata' }]); done = true; queue.end(); resolveDone(); return; }
+      if (turn.enrichment && type === 'btw.complete') { metadataText += string(payload.text); if (metadataText) push([{ type: 'text-start', id: 'hermes-metadata' }, { type: 'text-delta', id: 'hermes-metadata', delta: metadataText }, { type: 'text-end', id: 'hermes-metadata' }]); done = true; endQueueSoon(); resolveDone(); return; }
       if (turn.enrichment) return;
 
       if (!activeTurn) return;
@@ -205,7 +247,7 @@ export const hermesAdapter: HarnessAdapter = {
       else if (type === 'reasoning.delta' || type === 'thinking.delta') { const text = string(payload.text); if (text && !thoughtId) { thoughtId = `hermes-reasoning-${++thoughtSequence}`; push([{ type: 'reasoning-start', id: thoughtId }]); } if (text) push([{ type: 'reasoning-delta', id: thoughtId, delta: text }]); }
       else if (type === 'tool.start') { endThought(); push([{ type: 'tool-input-available', toolCallId: string(payload.tool_id), toolName: string(payload.name), input: payload.args ?? {}, dynamic: true, providerExecuted: true }]); }
       else if (type === 'tool.complete') { const id = string(payload.tool_id); push([{ type: 'tool-output-available', toolCallId: id, output: payload.result ?? payload.result_text ?? '', dynamic: true, providerExecuted: true }]); }
-      else if (type === 'message.complete') { endThought(); const text = string(payload.text); if (!streamed && text) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }, { type: 'text-delta', id: 'hermes-message', delta: text }]); } if (textStarted) push([{ type: 'text-end', id: 'hermes-message' }]); closeConnections(); done = true; queue.end(); resolveDone(); }
+      else if (type === 'message.complete') { endThought(); const text = string(payload.text); if (!streamed && text) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }, { type: 'text-delta', id: 'hermes-message', delta: text }]); } if (textStarted) push([{ type: 'text-end', id: 'hermes-message' }]); closeConnections(); done = true; endQueueSoon(); resolveDone(); }
       else if (type === 'error' || type === 'connection.error') fail(new Error(string(payload.message) || 'Hermes turn failed'));
       else if (type === 'approval.request') {
         void abortable(turn.approve({ id: string(payload.request_id), tool: 'terminal', input: payload }), turn.signal)
@@ -227,6 +269,8 @@ export const hermesAdapter: HarnessAdapter = {
       if (turn.enrichment) {
         if (!nativeId) throw new Error('Hermes metadata generation requires a completed native session');
         activeTurn = true;
+        bindingSession = false;
+        flushEarlyNotifications();
         await rpc.request('prompt.btw', { session_id: nativeId, text: turn.prompt }, turn.signal);
       } else {
         if (!nativeId) {
@@ -247,6 +291,7 @@ export const hermesAdapter: HarnessAdapter = {
         // that turn; submitting a new prompt here would be rejected and would lose the operation.
         if (pending) openConnection(pending, nativeId);
         bindingSession = false;
+        flushEarlyNotifications();
         for (const event of earlyConnections.splice(0)) acceptConnection(event);
         const attached = rpc.replayOpenRequests(openRequests) > 0 || [...activeConnections.values()].some(tracked => connectionActionable(tracked.state));
         drainingPrevious = attached && (submittedMessageId ? submittedMessageId !== turn.messageId : !turn.retry);
@@ -255,7 +300,7 @@ export const hermesAdapter: HarnessAdapter = {
       yield* queue;
       await completed;
     } catch (error) { if (turn.signal.aborted) throw abortError(); throw new Error(safeError(error)); }
-    finally { turnClosed = true; for (const controller of pendingServerRequests.values()) controller.abort(); pendingServerRequests.clear(); for (const timer of deadlines) clearTimeout(timer); deadlines.clear(); activeConnections.clear(); turn.signal.removeEventListener('abort', abort); unsub(); unsubscribeServerRequests(); }
+    finally { turnClosed = true; for (const timer of delayedQueueEnds) clearTimeout(timer); delayedQueueEnds.clear(); for (const controller of pendingServerRequests.values()) controller.abort(); pendingServerRequests.clear(); for (const timer of deadlines) clearTimeout(timer); deadlines.clear(); activeConnections.clear(); turn.signal.removeEventListener('abort', abort); unsub(); unsubscribeServerRequests(); }
   },
 };
 
