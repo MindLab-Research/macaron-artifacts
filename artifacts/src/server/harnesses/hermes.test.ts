@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { Question } from '../../shared/questions.js';
 import { closeHermesConnections, decodeHermesNativeId, encodeHermesNativeId } from './hermes.js';
 import { parseHermesReadyLine, rpcPayload } from './hermes-server.js';
 
@@ -246,6 +247,179 @@ describe('Hermes gateway adapter protocol helpers', () => {
         data: { action: 'clear', key: 'startup-warning.external-memory' },
       });
       expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['ready']);
+    });
+  });
+
+  test('round-trips vault login and one-time-code requests as secret questions', async () => {
+    let askCount = 0;
+    const requestParams: Record<string, unknown>[] = [];
+    const route: FakeRoute = (request, gateway) => {
+      if (request.params) requestParams.push(request.params);
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: ['vault.save_login', 'vault.code'] });
+      else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-vault', stored_session_id: 'stored-vault' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.serverRequest('srq-save-login', 'vault.save_login', { session_id: 'runtime-vault', origin: 'https://example.com/login?next=private', site: 'Example' }));
+      } else if (request.id === 'srq-save-login') {
+        expect(request.method).toBeUndefined();
+        expect(request.params).toBeUndefined();
+        gateway.soon(() => gateway.serverRequest('srq-code', 'vault.code', { session_id: 'runtime-vault', site: 'Example', hint: 'email' }));
+      } else if (request.id === 'srq-code') {
+        expect(request.method).toBeUndefined();
+        expect(request.params).toBeUndefined();
+        gateway.soon(() => gateway.event('message.complete', { text: 'vault complete' }, 'runtime-vault'));
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.vault.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const base = {
+        cwd: '/tmp', instructions: '', signal: new AbortController().signal,
+        ask: async (request: { questions: Question[] }): Promise<{ answers: Record<string, string[]> }> => {
+          askCount++;
+          if (askCount === 1) {
+            expect(request.questions).toEqual([
+              { id: 'identifier', header: 'example.com', question: '登录账号或邮箱', options: [], custom: true, secret: true, placeholder: '输入账号或邮箱' },
+              { id: 'password', header: 'example.com', question: '登录密码', options: [], custom: true, secret: true, placeholder: '输入密码' },
+            ]);
+            return { answers: { identifier: ['alice@example.com'], password: ['vault-password'] } };
+          }
+          expect(request.questions).toEqual([{ id: 'code', header: 'Example', question: '一次性验证码', options: [], custom: true, secret: true, placeholder: '输入验证码' }]);
+          return { answers: { code: ['123456'] } };
+        },
+        approve: async () => true,
+        onNativeSession: (_id: string) => {},
+      };
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'trigger vault' })) chunks.push(chunk);
+      expect(requestParams.every(params => !JSON.stringify(params).includes('alice@example.com') && !JSON.stringify(params).includes('vault-password') && !JSON.stringify(params).includes('123456'))).toBe(true);
+      expect(gateway.sent.find(request => request.id === 'srq-save-login')).toEqual({ jsonrpc: '2.0', id: 'srq-save-login', result: { value: '{"identifier":"alice@example.com","password":"vault-password"}' } });
+      expect(gateway.sent.find(request => request.id === 'srq-code')).toEqual({ jsonrpc: '2.0', id: 'srq-code', result: { value: '123456' } });
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['vault complete']);
+    });
+  });
+
+  test('returns an empty vault value when the user cancels the prompt', async () => {
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: true });
+      else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-vault-cancel', stored_session_id: 'stored-vault-cancel' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.serverRequest('srq-vault-cancel', 'vault.code', { session_id: 'runtime-vault-cancel', site: 'Example' }));
+      } else if (request.id === 'srq-vault-cancel') {
+        expect(request.result).toEqual({ value: '' });
+        expect(request.params).toBeUndefined();
+        gateway.soon(() => gateway.event('message.complete', { text: 'cancelled' }, 'runtime-vault-cancel'));
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.vault-cancel.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({
+        cwd: '/tmp', prompt: 'cancel vault', instructions: '', signal: new AbortController().signal,
+        ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: () => {},
+      })) chunks.push(chunk);
+      expect(gateway.sent.find(request => request.id === 'srq-vault-cancel')).toEqual({ jsonrpc: '2.0', id: 'srq-vault-cancel', result: { value: '' } });
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['cancelled']);
+    });
+  });
+
+  test('suppresses a timed-out vault request after request.cancel aborts its question', async () => {
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: true });
+      else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-vault-timeout', stored_session_id: 'stored-vault-timeout' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.serverRequest('srq-vault-timeout', 'vault.code', { session_id: 'runtime-vault-timeout', site: 'Example' }));
+      } else if (request.id === 'srq-vault-timeout') {
+        throw new Error('A timed-out vault request must not receive a response');
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.vault-timeout.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({
+        cwd: '/tmp', prompt: 'timeout vault', instructions: '', signal: new AbortController().signal,
+        ask: async (_request, signal) => new Promise<{ cancelled: true }>(resolve => {
+          if (!signal) throw new Error('vault timeout smoke did not receive a signal');
+          signal.addEventListener('abort', () => resolve({ cancelled: true }), { once: true });
+          queueMicrotask(() => {
+            gateway.event('request.cancel', { id: 'srq-vault-timeout', method: 'vault.code', reason: 'timeout' }, 'runtime-vault-timeout');
+            queueMicrotask(() => gateway.event('message.complete', { text: 'timeout vault finished' }, 'runtime-vault-timeout'));
+          });
+        }),
+        approve: async () => true, onNativeSession: () => {},
+      })) chunks.push(chunk);
+      expect(gateway.sent.some(request => request.id === 'srq-vault-timeout')).toBe(false);
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['timeout vault finished']);
+    });
+  });
+
+  test('routes vault requests only to the bound session and redacts handler errors', async () => {
+    let asks = 0;
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: true });
+      else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-vault-route', stored_session_id: 'stored-vault-route' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.serverRequest('srq-vault-foreign', 'vault.code', { session_id: 'other-session', site: 'Example' }));
+      } else if (request.id === 'srq-vault-foreign') {
+        expect(request.error).toEqual({ code: -32601, message: 'no handler for server request: vault.code' });
+        gateway.soon(() => gateway.serverRequest('srq-vault-error', 'vault.code', { session_id: 'runtime-vault-route', site: 'Example' }));
+      } else if (request.id === 'srq-vault-error') {
+        expect(request.error).toEqual({ code: -32603, message: 'Hermes vault request failed' });
+        gateway.soon(() => gateway.event('message.complete', { text: 'route complete' }, 'runtime-vault-route'));
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.vault-route.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({
+        cwd: '/tmp', prompt: 'route vault', instructions: '', signal: new AbortController().signal,
+        ask: async () => { asks++; throw new Error('handler failure with sensitive value'); },
+        approve: async () => true, onNativeSession: () => {},
+      })) chunks.push(chunk);
+      expect(asks).toBe(1);
+      expect(gateway.sent.find(request => request.id === 'srq-vault-foreign')?.error).toBeDefined();
+      expect(JSON.stringify(gateway.sent.find(request => request.id === 'srq-vault-error'))).not.toContain('sensitive value');
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['route complete']);
+    });
+  });
+
+  test('replays an open vault request after reconnect before submitting the next prompt', async () => {
+    let nativeId = '';
+    let promptSubmits = 0;
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: true });
+      else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-vault-first', stored_session_id: 'stored-vault-reconnect' });
+      else if (request.method === 'session.resume') gateway.reply(request, { session_id: 'runtime-vault-reconnected', stored_session_id: 'stored-vault-reconnect', open_requests: [{ id: 'srq-vault-replay', method: 'vault.code', params: { session_id: 'runtime-vault-reconnected', site: 'Example' } }] });
+      else if (request.method === 'prompt.submit') {
+        promptSubmits++;
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.event('message.complete', { text: promptSubmits === 1 ? 'first' : 'second' }, promptSubmits === 1 ? 'runtime-vault-first' : 'runtime-vault-reconnected'));
+      } else if (request.id === 'srq-vault-replay') {
+        expect(request.result).toEqual({ value: '654321' });
+        expect(request.params).toBeUndefined();
+        gateway.soon(() => gateway.event('message.complete', { text: 'replayed request complete' }, 'runtime-vault-reconnected'));
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.vault-reconnect.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const base = {
+        cwd: '/tmp', instructions: '', signal: new AbortController().signal,
+        ask: async (request: { questions: Question[] }) => {
+          expect(request.questions).toEqual([{ id: 'code', header: 'Example', question: '一次性验证码', options: [], custom: true, secret: true, placeholder: '输入验证码' }]);
+          return { answers: { code: ['654321'] } };
+        },
+        approve: async () => true, onNativeSession: (id: string) => { nativeId = id; },
+      };
+      const first = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'first prompt' })) first.push(chunk);
+      const second = [];
+      for await (const chunk of hermesAdapter.run({ ...base, nativeId, prompt: 'second prompt' })) second.push(chunk);
+      expect(gateway.sent.find(request => request.id === 'srq-vault-replay')).toEqual({ jsonrpc: '2.0', id: 'srq-vault-replay', result: { value: '654321' } });
+      expect(promptSubmits).toBe(2);
+      expect(first.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['first']);
+      expect(second.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['second']);
     });
   });
 });

@@ -3,7 +3,59 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessTurn } from './types.js';
-import { createPiSession, piProfileOptions, runPiSession } from './pi.js';
+import { createPiModelRuntime, createPiSession, piProfileOptions, runPiSession } from './pi.js';
+
+/** The Azure rename cases drive the runtime through stubs; only the members the adapter touches exist. */
+const azureSdk = (runtime: object, resolveCliModel: (input: { cliModel: string }) => unknown = () => ({ model: { provider: 'azure', id: 'gpt-5.4' } })) =>
+  ({ ModelRuntime: { create: async () => runtime }, resolveCliModel }) as unknown as Parameters<typeof createPiModelRuntime>[0];
+
+test('pi Azure provider rename accepts saved profiles only when the legacy provider is absent', async () => {
+  for (const hasLegacy of [false, true]) {
+    const changes: string[] = [], old = 'azure-openai-responses', selected = hasLegacy ? old : 'azure';
+    const runtime = {
+      getProvider: (name: string) => name === 'azure' || (hasLegacy && name === old) ? {} : undefined,
+      registerProvider: (name: string, value: { baseUrl: string }) => { changes.push(`endpoint:${name}:${value.baseUrl}`); },
+      setRuntimeApiKey: async (name: string, key: string) => { changes.push(`key:${name}:${key}`); },
+      config: { getProvider: () => undefined },
+    };
+    const sdk = azureSdk(runtime, ({ cliModel }) => cliModel === `${selected}/gpt-5.4` ? { model: { provider: selected, id: 'gpt-5.4' } } : { error: `Model ${cliModel} not found` });
+    const config = { model: `${old}/gpt-5.4`, provider: old, baseUrl: 'https://azure.test', authMode: 'api-key' as const };
+    const result = await createPiModelRuntime(sdk, '/unused', AbortSignal.timeout(1000), { config, apiKey: 'test' });
+    expect(result.resolved?.model?.provider).toBe(selected);
+    expect(changes).toEqual([`endpoint:${selected}:https://azure.test`, `key:${selected}:test`]);
+    expect(config.provider).toBe(old); expect(config.model).toBe(`${old}/gpt-5.4`);
+  }
+});
+
+test('pi Azure migration fails closed when runtime custom-provider introspection is unavailable', async () => {
+  const runtime = {
+    getProvider: (name: string) => name === 'azure' ? {} : undefined,
+    registerProvider: () => {}, setRuntimeApiKey: async () => {},
+  };
+  const sdk = azureSdk(runtime);
+  await expect(createPiModelRuntime(sdk, '/unused', AbortSignal.timeout(1000), { config: { provider: 'azure-openai-responses', model: 'azure-openai-responses/gpt-5.4' }, apiKey: 'secret' }))
+    .rejects.toThrow('cannot verify whether the renamed Azure provider is custom');
+});
+
+test('legacy Azure profiles do not overwrite a custom azure provider in models.json', async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'macaron-pi-azure-'));
+  const changes: string[] = [];
+  const runtime = {
+    getProvider: (name: string) => name === 'azure' ? {} : undefined,
+    registerProvider: () => { changes.push('endpoint'); },
+    setRuntimeApiKey: async () => { changes.push('key'); },
+    config: { getProvider: (name: string) => name === 'azure' ? {} : undefined },
+  };
+  const sdk = azureSdk(runtime);
+  const models = JSON.stringify({ providers: { azure: { baseUrl: 'https://custom.test', api: 'openai-completions', models: [] } } });
+  try {
+    await writeFile(join(agentDir, 'models.json'), models);
+    await expect(createPiModelRuntime(sdk, agentDir, AbortSignal.timeout(1000), { config: { provider: 'azure-openai-responses', model: 'azure-openai-responses/gpt-5.4', baseUrl: 'https://legacy.test' }, apiKey: 'secret' }))
+      .rejects.toThrow('A custom pi provider named "azure" conflicts');
+    expect(changes).toEqual([]);
+    expect(await readFile(join(agentDir, 'models.json'), 'utf8')).toBe(models);
+  } finally { await rm(agentDir, { recursive: true, force: true }); }
+});
 
 test('pi profiles isolate concurrent provider requests and preserve native credentials, catalog and metadata prefix', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'macaron-pi-profiles-')), agentDir = join(directory, 'agent');

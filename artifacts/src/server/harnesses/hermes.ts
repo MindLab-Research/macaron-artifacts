@@ -33,6 +33,32 @@ function hermesAnswers(answers: Record<string, string[]>, questions: { id: strin
   const multiSelect = new Set(questions.filter(question => question.multiple).map(question => question.id));
   return Object.fromEntries(Object.entries(answers).map(([id, values]) => [id, encodeAnswer(values, multiSelect.has(id))]));
 }
+function vaultHeader(params: Record<string, unknown>) {
+  // `origin` is the only native field that is URL-shaped. Use its hostname rather than
+  // echoing userinfo, paths, query strings or fragments into a persisted question card.
+  const origin = string(params.origin);
+  try {
+    const hostname = new URL(origin).hostname;
+    if (hostname) return hostname;
+  } catch { /* vault.code has no required origin; use its display site below. */ }
+  const site = string(params.site).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120);
+  return site || '网站';
+}
+function vaultQuestions(request: { method: string; params: Record<string, unknown> }) {
+  const site = vaultHeader(request.params);
+  if (request.method === 'vault.save_login') return [
+    // The identifier is sensitive account data too. Marking both fields secret keeps the
+    // browser draft out of sessionStorage and masks the completed response in the journal/SSE.
+    { id: 'identifier', header: site, question: '登录账号或邮箱', options: [], custom: true, secret: true, placeholder: '输入账号或邮箱' },
+    { id: 'password', header: site, question: '登录密码', options: [], custom: true, secret: true, placeholder: '输入密码' },
+  ];
+  return [{ id: 'code', header: site, question: '一次性验证码', options: [], custom: true, secret: true, placeholder: '输入验证码' }];
+}
+function vaultValue(method: string, response: { answers: Record<string, string[]> } | { cancelled: true }) {
+  if (!('answers' in response)) return '';
+  if (method === 'vault.save_login') return JSON.stringify({ identifier: response.answers.identifier?.[0] || '', password: response.answers.password?.[0] || '' });
+  return response.answers.code?.[0] || '';
+}
 export async function closeHermesConnections() { const values = [...connections.values()]; connections.clear(); await Promise.allSettled(values.map(value => value.close())); }
 
 function assertSupported(profile: HarnessTurn['profile']) {
@@ -174,11 +200,11 @@ export const hermesAdapter: HarnessAdapter = {
     };
     // Own the request for its lifetime: track its abort controller, then reply once with the produced
     // result or a redacted error. request.cancel and turn teardown abort the signal to suppress the reply.
-    const answerServerRequest = (id: string, produce: (signal: AbortSignal) => Promise<Record<string, unknown>>) => {
+    const answerServerRequest = (id: string, produce: (signal: AbortSignal) => Promise<Record<string, unknown>>, errorMessage?: string) => {
       const controller = new AbortController(); pendingServerRequests.set(id, controller);
       void produce(controller.signal)
         .then(result => { if (!controller.signal.aborted) rpc.respond(id, result); })
-        .catch(error => { if (!controller.signal.aborted) rpc.respondError(id, -32603, safeError(error)); })
+        .catch(error => { if (!controller.signal.aborted) rpc.respondError(id, -32603, errorMessage || safeError(error)); })
         .finally(() => pendingServerRequests.delete(id));
     };
     // Cancellation reaches us as either a server request or a plain event; both just drop the reply.
@@ -207,6 +233,13 @@ export const hermesAdapter: HarnessAdapter = {
           const approved = await turn.approve({ id: string(request.params.request_id) || request.id, tool: string(request.params.tool_name) || 'terminal', input: request.params }, signal);
           return { choice: approved ? 'once' : 'deny' };
         });
+        return true;
+      }
+      if (request.method === 'vault.save_login' || request.method === 'vault.code') {
+        answerServerRequest(request.id, async signal => {
+          const response = await turn.ask({ questions: vaultQuestions(request) }, signal);
+          return { value: vaultValue(request.method, response) };
+        }, 'Hermes vault request failed');
         return true;
       }
       return false;

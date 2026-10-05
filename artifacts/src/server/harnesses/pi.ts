@@ -122,10 +122,24 @@ const instruction = (value: unknown) => ['system', 'developer'].includes(String(
 /** A fresh runtime owns each turn's provider overlays and temporary credentials, including metadata forks. */
 export async function createPiModelRuntime(sdk: PiSdk, agentDir: string, signal: AbortSignal, profile?: ResolvedProfile, modelOverride?: string) {
   const modelRuntime = await sdk.ModelRuntime.create({ authPath: path.join(agentDir, 'auth.json'), modelsPath: path.join(agentDir, 'models.json'), signal });
-  const config = profile?.config, selection = modelOverride || config?.model, apiKey = config?.authMode === 'inherit' ? undefined : profile?.apiKey;
+  const config = profile?.config, apiKey = config?.authMode === 'inherit' ? undefined : profile?.apiKey;
+  // Only the built-in Azure provider was renamed in pi 1.0.3. Keep an explicitly
+  // registered legacy/custom provider and the stored profile unchanged.
+  const oldAzure = 'azure-openai-responses', newAzure = 'azure', savedModel = modelOverride || config?.model;
+  const renamedAzure = !modelRuntime.getProvider(oldAzure) && Boolean(modelRuntime.getProvider(newAzure));
+  const renamedModel = renamedAzure && savedModel?.startsWith(`${oldAzure}/`) ? `${newAzure}/${savedModel.slice(oldAzure.length + 1)}` : undefined;
+  const renamedProvider = renamedAzure && config?.provider === oldAzure;
+  if (renamedModel || renamedProvider) {
+    // A models.json provider called "azure" can shadow the new built-in. Do not send an old
+    // Azure profile to someone else's custom endpoint or overwrite that provider's settings.
+    const runtimeConfig = (modelRuntime as unknown as { config?: { getProvider?: (providerId: string) => unknown } }).config;
+    if (typeof runtimeConfig?.getProvider !== 'function') throw new Error('Pi runtime cannot verify whether the renamed Azure provider is custom');
+    if (runtimeConfig.getProvider(newAzure) !== undefined) throw new Error('A custom pi provider named "azure" conflicts with the renamed built-in Azure provider; migrate this profile explicitly before using it');
+  }
+  const selection = renamedModel ?? savedModel;
   let resolved = selection ? sdk.resolveCliModel({ cliModel: selection, modelRuntime }) : undefined;
   if (resolved?.error) throw new Error(resolved.error);
-  const provider = config?.provider || resolved?.model?.provider;
+  const provider = renamedProvider ? newAzure : config?.provider || resolved?.model?.provider;
   if (config?.baseUrl || apiKey) {
     if (!provider) throw new Error('Choose a pi provider or model before overriding its endpoint or API key');
     if (!modelRuntime.getProvider(provider)) throw new Error('Configure this provider in pi models.json before using it in a profile');
