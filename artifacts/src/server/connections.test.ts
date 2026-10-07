@@ -39,7 +39,7 @@ async function fixture(mode = '') {
         if (mode === 'early') event('connection.request', state);
         return reply({ session_id: 'native', stored_session_id: 'stored', ...(mode === 'resume' || mode.startsWith('retry-pending') ? { pending_connection: state } : {}) });
       }
-      if (method === 'prompt.submit') { state = snapshot(); if (mode === 'deadline') state.deadline_at = Date.now() / 1000 + 0.08; reply({ status: 'streaming' }); event('connection.request', state); return; }
+      if (method === 'prompt.submit') { state = mode === 'catalog' ? { ...snapshot(), targets: catalogRows() as unknown as ConnectionState['targets'] } : snapshot(); if (mode === 'deadline') state.deadline_at = Date.now() / 1000 + 0.08; reply({ status: 'streaming' }); event('connection.request', state); return; }
       if (method === 'prompt.btw') { reply({}); event('btw.complete', { text: '{}' }); return; }
       if (method === 'session.interrupt') { finish('interrupt'); return reply({}); }
       if (method === 'connectors.operation.status') return reply(state);
@@ -194,4 +194,65 @@ test('MCP required/default and answer contract do not admit unadvertised or host
   for (const answer of [{ targets: [] }, { targets: [{ name: 'Docs', status: 'approved' }] }, { targets: [{ name: 'Docs', status: 'approved', env: [] }] }, { targets: [{ name: 'Mail', status: 'connected' }] }, { targets: [{ name: 'Mail', status: 'approved' }] }, { targets: [], settled_by: 'all_resolved' }]) expect(() => validateConnectionResponse(answer, state)).toThrow();
   expect(validateConnectionResponse({ targets: [], settled_by: 'continue' }, state)).toEqual({ targets: [], settled_by: 'continue' });
   expect(validateConnectionResponse({ targets: [{ name: 'Docs', status: 'approved', env: { API_KEY: 'public-test-value' } }] }, state).targets[0].env).toEqual({ API_KEY: 'public-test-value' });
+});
+
+const catalogRows = () => [
+  { name: 'nvidia-app', kind: 'plugin', action: 'install', state: 'pending', display: 'NVIDIA App', description: 'Overlay and driver tools', tier: 'official', platforms: ['windows'], repo: 'https://github.com/NousResearch/hermes-nvidia', sha: 'a'.repeat(40), subdir: 'nvidia-app', scan: { status: 'warnings', summary: 'Review permissions' }, requirements: ['NVIDIA App'], has_desktop_half: true, target_profile: 'default', app_state: 'present', required_env: [{ name: 'ACCESS_KEY', required: true, secret: true, default: '' }] },
+  { name: 'obsidian-notes', kind: 'skill', action: 'install', state: 'pending', display: 'Obsidian notes', description: 'Work with vault notes', tier: 'community', target_profile: 'default' },
+] as const;
+
+test('Hermes catalog plugin and skill survive mixed operation snapshots, updates, and redaction', () => {
+  const state = normalizeConnection({ ...snapshot(), targets: [snapshot().targets[0], ...catalogRows()] })!;
+  expect(state.targets.map(row => row.kind)).toEqual(['connector', 'plugin', 'skill']);
+  expect(state.targets[1]).toMatchObject({ display: 'NVIDIA App', platforms: ['windows'], scan: { status: 'warnings' }, has_desktop_half: true });
+  const next = normalizeConnection({ ...state, seq: 1, targets: [state.targets[0], { ...state.targets[1], state: 'connected', tools: ['nvapp_tool'] }, { ...state.targets[2], state: 'skipped' }] }, state)!;
+  expect(next.targets[1]).toMatchObject({ state: 'connected', tools: ['nvapp_tool'] });
+  expect(next.targets[2].state).toBe('skipped');
+  expect(JSON.stringify(redactConnection(state))).not.toContain('PRIVATE-');
+  expect(JSON.stringify(redactConnection(state))).not.toContain('PRIVATE-DEFAULT');
+});
+
+test('catalog install approvals accept only per-kind controls and declared credentials', () => {
+  const state = normalizeConnection({ ...snapshot(), targets: catalogRows() })!;
+  const answer = { targets: [{ name: 'nvidia-app', status: 'approved', env: { ACCESS_KEY: 'secret-value', agent_half: '1', desktop_half: '0', enable: '1', force: '0', ref: 'a'.repeat(40), target_profile: 'work' } }] };
+  expect(validateConnectionResponse(answer, state).targets[0].env).toEqual(answer.targets[0].env);
+  expect(validateConnectionResponse({ targets: [{ name: 'obsidian-notes', status: 'approved', env: { force: '1', target_profile: 'work' } }] }, state).targets[0].env).toEqual({ force: '1', target_profile: 'work' });
+  for (const env of [{ desktop_half: '1' }, { agent_half: '1' }, { enable: '1' }, { ref: 'a'.repeat(40) }, { EXTRA: '1' }]) {
+    expect(() => validateConnectionResponse({ targets: [{ name: 'obsidian-notes', status: 'approved', env }] }, state)).toThrow();
+  }
+  for (const env of [{ force: 'true' }, { agent_half: '2' }, { ref: 'main' }, { target_profile: '../other' }, { desktop_half: 'x' }, { REF: 'a'.repeat(40) }]) {
+    expect(() => validateConnectionResponse({ targets: [{ name: 'nvidia-app', status: 'approved', env: { ACCESS_KEY: 'secret-value', ...env } }] }, state)).toThrow();
+  }
+  expect(() => validateConnectionResponse({ targets: [{ name: 'nvidia-app', status: 'approved', env: { agent_half: '1' } }] }, state)).toThrow();
+  expect(validateConnectionResponse({ targets: [{ name: 'obsidian-notes', status: 'skipped' }, { name: 'nvidia-app', status: 'approved', env: { ACCESS_KEY: 'secret-value' } }] }, state).targets.map(t => t.status)).toEqual(['skipped', 'approved']);
+  expect(() => validateConnectionResponse({ targets: [{ name: 'nvidia-app', status: 'approved' }], settled_by: 'deadline' }, state)).toThrow();
+});
+
+test('untrusted catalog metadata cannot smuggle links, invalid variants or unsafe controls', () => {
+  const [plugin, skill] = catalogRows();
+  const state = normalizeConnection({ ...snapshot(), targets: [{ ...plugin, repo: 'javascript:alert(1)', scan: { status: 'invalid', summary: 'x' }, tier: 'unknown', app_state: 'unknown', platforms: ['windows', 123] }, skill] })!;
+  expect(state.targets[0].repo).toBeUndefined();
+  expect(state.targets[0].scan).toBeUndefined();
+  expect(state.targets[0].tier).toBeUndefined();
+  expect(state.targets[0].app_state).toBe('unknown');
+  expect(state.targets[0].platforms).toEqual(['windows']);
+  expect(normalizeConnection({ ...snapshot(), targets: [{ ...plugin, required_env: [{ name: 'force', required: true, secret: true, default: '' }] }, skill] })).toBeUndefined();
+});
+
+test('catalog request -> HTTP answer -> native owner RPC -> update, skip and secret-free replay', async () => {
+  const f = await fixture('catalog');
+  expect(f.parts()[0].data.targets.map(target => target.kind)).toEqual(['plugin', 'skill']);
+  expect(f.parts()[0].data.targets[0]).toMatchObject({ display: 'NVIDIA App', has_desktop_half: true, target_profile: 'default' });
+  expect((await f.command({ targets: [{ name: 'nvidia-app', status: 'approved', env: { desktop_half: '1', ACCESS_KEY: 'PRIVATE-USER-KEY' } }] })).status).toBe(200);
+  const call = f.calls.findLast(item => item.method === 'connection.respond')!.params;
+  expect(call.owner).toEqual({ type: 'session', session_id: 'native' });
+  expect(call.result.targets[0].env).toEqual({ desktop_half: '1', ACCESS_KEY: 'PRIVATE-USER-KEY' });
+  expect(f.parts().at(-1)?.data.targets[0].state).toBe('connected');
+  expect((await f.command({ targets: [{ name: 'obsidian-notes', status: 'skipped' }] })).status).toBe(200);
+  expect(f.parts().at(-1)?.data.targets[1].state).toBe('skipped');
+  expect((await f.command({ targets: [], settled_by: 'continue' })).status).toBe(200);
+  await f.first.text();
+  const saved = await readFile(f.app.store.path(f.session.id), 'utf8');
+  expect(saved).not.toContain('PRIVATE-USER-KEY');
+  expect(saved).toContain('NVIDIA App');
 });

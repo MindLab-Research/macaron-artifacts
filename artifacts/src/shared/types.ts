@@ -8,7 +8,7 @@ export type HarnessId = 'claude-code' | 'codex' | 'opencode' | 'opencode-v2' | '
 // Import graphs follow disk snapshots, independently of each streamed source revision.
 export interface Artifact { path: string; source: string; streaming: boolean; revision: number; importsRevision?: number }
 export interface Approval { id: string; tool: string; input: unknown }
-export type ConnectionTargetKind = 'connector' | 'mcp';
+export type ConnectionTargetKind = 'connector' | 'mcp' | 'plugin' | 'skill';
 export type ConnectionTargetAction = 'authorize' | 'connect' | 'enable' | 'install' | 'reconnect';
 export type ConnectionTargetState = 'pending' | 'initiated' | 'connected' | 'skipped' | 'failed' | 'expired' | 'not_connected';
 export type ConnectionSettleReason = 'all_resolved' | 'continue' | 'deadline' | 'interrupt';
@@ -37,6 +37,20 @@ export interface ConnectionTarget {
   required_env?: ConnectionTargetEnvField[];
   tools?: string[];
   hint?: string;
+  /** Host-resolved catalog metadata. Never inferred from the model's tool arguments. */
+  display?: string;
+  description?: string;
+  tier?: 'official' | 'community';
+  platforms?: string[];
+  repo?: string;
+  sha?: string;
+  subdir?: string;
+  scan?: { status: 'passed' | 'warnings' | 'failed'; summary: string };
+  requirements?: string[];
+  has_desktop_half?: boolean;
+  target_profile?: string;
+  app_state?: 'present' | 'missing_app' | 'app_not_running' | 'unknown';
+  skill?: string;
 }
 
 export interface ConnectionRequest {

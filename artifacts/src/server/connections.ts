@@ -8,6 +8,8 @@ const SETTLED_BY = new Set(['all_resolved', 'continue', 'deadline', 'interrupt']
 const TERMINAL = new Set(['connected', 'skipped', 'expired']);
 /** MCP servers are installed or enabled locally. Every other action is owned by a hosted provider handshake. */
 const APPROVABLE = new Set(['install', 'enable']);
+const CATALOG_KINDS = new Set(['plugin', 'skill']);
+const CATALOG_CONTROLS = new Set(['agent_half', 'desktop_half', 'enable', 'force', 'ref', 'target_profile']);
 
 export class ConnectionInputError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -33,13 +35,17 @@ function envField(value: unknown): ConnectionTargetEnvField | undefined {
 
 function target(value: unknown): ConnectionTarget | undefined {
   const row = record(value), name = identifier(row.name), kind = string(row.kind), action = string(row.action), state = string(row.state);
-  if (!name || (kind !== 'connector' && kind !== 'mcp') || !ACTIONS.has(action) || !STATES.has(state)) return undefined;
+  if (!name || !['connector', 'mcp', 'plugin', 'skill'].includes(kind) || !ACTIONS.has(action) || !STATES.has(state)) return undefined;
   const env = Array.isArray(row.required_env) ? row.required_env.map(envField).filter((field): field is ConnectionTargetEnvField => Boolean(field)) : undefined;
   if (row.required_env != null && (!Array.isArray(row.required_env) || env?.length !== row.required_env.length || new Set(env?.map(field => field.name)).size !== env?.length)) return undefined;
+  if (CATALOG_KINDS.has(kind) && env?.some(field => CATALOG_CONTROLS.has(field.name))) return undefined;
   const tools = Array.isArray(row.tools) ? row.tools.map(tool => text(tool, 200)).filter((tool): tool is string => Boolean(tool)).slice(0, 100) : undefined;
   const link = safeLink(row.connect_url);
+  const catalog = CATALOG_KINDS.has(kind);
+  const scan = record(row.scan);
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').map(item => text(item, 200)).filter((item): item is string => Boolean(item)).slice(0, 50) : undefined;
   return {
-    name, kind, action: action as ConnectionTarget['action'], state: state as ConnectionTarget['state'],
+    name, kind: kind as ConnectionTarget['kind'], action: action as ConnectionTarget['action'], state: state as ConnectionTarget['state'],
     ...(text(row.detail) ? { detail: text(row.detail) } : {}),
     ...(text(row.instructions) ? { instructions: text(row.instructions) } : {}),
     ...(text(row.discovery_error) ? { discovery_error: text(row.discovery_error) } : {}),
@@ -49,6 +55,21 @@ function target(value: unknown): ConnectionTarget | undefined {
     ...(env?.length ? { required_env: env } : {}),
     ...(tools?.length ? { tools } : {}),
     ...(text(row.hint) ? { hint: text(row.hint) } : {}),
+    ...(catalog ? {
+      ...(text(row.display, 200) ? { display: text(row.display, 200) } : {}),
+      ...(text(row.description) ? { description: text(row.description) } : {}),
+      ...(['official', 'community'].includes(string(row.tier)) ? { tier: row.tier as ConnectionTarget['tier'] } : {}),
+      ...(strings(row.platforms) ? { platforms: strings(row.platforms) } : {}),
+      ...(safeLink(row.repo) ? { repo: safeLink(row.repo) } : {}),
+      ...(/^[a-f0-9]{40}$/i.test(string(row.sha)) ? { sha: string(row.sha) } : {}),
+      ...(text(row.subdir, 400) ? { subdir: text(row.subdir, 400) } : {}),
+      ...(['passed', 'warnings', 'failed'].includes(string(scan.status)) ? { scan: { status: scan.status as NonNullable<ConnectionTarget['scan']>['status'], summary: text(scan.summary) ?? '' } } : {}),
+      ...(strings(row.requirements) ? { requirements: strings(row.requirements) } : {}),
+      ...(typeof row.has_desktop_half === 'boolean' ? { has_desktop_half: row.has_desktop_half } : {}),
+      ...(text(row.target_profile, 200) ? { target_profile: text(row.target_profile, 200) } : {}),
+      ...(['present', 'missing_app', 'app_not_running', 'unknown'].includes(string(row.app_state)) ? { app_state: row.app_state as ConnectionTarget['app_state'] } : {}),
+      ...(text(row.skill, 200) ? { skill: text(row.skill, 200) } : {}),
+    } : {}),
   };
 }
 
@@ -112,18 +133,28 @@ export function validateConnectionResponse(input: unknown, state: ConnectionStat
     if (!advertised) throw new ConnectionInputError('This target is not part of the connection operation.');
     if (status !== 'approved' && status !== 'skipped') throw new ConnectionInputError('status must be "approved" or "skipped".');
     if (TERMINAL.has(advertised.state)) throw new ConnectionInputError(`Target ${name} already finished.`);
-    if (status === 'approved' && (advertised.kind !== 'mcp' || !APPROVABLE.has(advertised.action))) {
+    if (status === 'approved' && !((advertised.kind === 'mcp' && APPROVABLE.has(advertised.action)) || (CATALOG_KINDS.has(advertised.kind) && advertised.action === 'install'))) {
       throw new ConnectionInputError(`Only the agent backend can confirm ${name}; from here it can only be skipped.`);
     }
     const env: Record<string, string> = {};
     if (answer.env !== undefined && answer.env !== null) {
-      if (status !== 'approved') throw new ConnectionInputError('Environment values only apply to an approved MCP target.');
+      if (status !== 'approved') throw new ConnectionInputError('Environment values only apply to an approved target.');
       if (typeof answer.env !== 'object' || Array.isArray(answer.env)) throw new ConnectionInputError('Environment values must be an object.');
       const provided = record(answer.env), advertisedEnv = advertised.required_env ?? [];
       for (const [key, value] of Object.entries(provided)) {
         const field = advertisedEnv.find(candidate => candidate.name === key);
-        if (!field) throw new ConnectionInputError(`${key} is not requested by ${name}.`);
+        const control = CATALOG_KINDS.has(advertised.kind) && CATALOG_CONTROLS.has(key);
+        if (!field && !control) throw new ConnectionInputError(`${key} is not requested by ${name}.`);
         if (typeof value !== 'string' || value.length > 4000 || /[\0\r\n]/.test(value)) throw new ConnectionInputError(`${key} has an invalid value.`);
+        if (control) {
+          if ((advertised.kind !== 'plugin' && !['force', 'target_profile'].includes(key)) ||
+              (key === 'desktop_half' && !advertised.has_desktop_half) ||
+              (['agent_half', 'desktop_half', 'enable', 'force'].includes(key) && value !== '0' && value !== '1') ||
+              (key === 'ref' && !/^[a-f0-9]{40}$/i.test(value)) ||
+              (key === 'target_profile' && (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,199}$/.test(value) || value.includes('..')))) {
+            throw new ConnectionInputError(`${key} has an invalid value for ${name}.`);
+          }
+        }
         if (value.trim()) env[key] = value;
       }
     }
