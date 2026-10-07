@@ -422,4 +422,138 @@ describe('Hermes gateway adapter protocol helpers', () => {
       expect(second.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['second']);
     });
   });
+
+  test('surfaces a required free-tier browser challenge as a sticky notice with its link', async () => {
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'session.create') {
+        // Raised while the session is still binding, exactly like the upstream gateway does.
+        gateway.event('free_tier.challenge', {
+          type: 'browser', url: 'https://gateway.example/challenge?token=abc', required: true,
+          expires_in: 300, message: 'Open the challenge page to continue', attempt: 1,
+        }, 'runtime-challenge');
+        gateway.reply(request, { session_id: 'runtime-challenge', stored_session_id: 'stored-challenge' });
+      }
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.event('message.complete', { text: 'solved' }, 'runtime-challenge'));
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.challenge-required.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const base = { cwd: '/tmp', instructions: '', signal: new AbortController().signal, ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: (_id: string) => {} };
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'needs a challenge' })) chunks.push(chunk);
+      expect(chunks).toContainEqual({
+        type: 'data-notification', id: 'hermes-notification:free_tier.challenge', transient: true,
+        data: { action: 'show', text: 'Open the challenge page to continue', level: 'warn', kind: 'sticky', key: 'free_tier.challenge', link: 'https://gateway.example/challenge?token=abc' },
+      });
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['solved']);
+      // The sticky notice has no expiry of its own: the completed turn has to retire it, exactly once.
+      const cleared = chunks.filter(chunk => chunk.type === 'data-notification' && chunk.data.action === 'clear' && chunk.data.key === 'free_tier.challenge');
+      expect(cleared).toEqual([{
+        type: 'data-notification', id: 'hermes-notification-clear:free_tier.challenge', transient: true,
+        data: { action: 'clear', key: 'free_tier.challenge' },
+      }]);
+      // The backend polls for the outcome; this client must not answer the challenge itself.
+      expect(gateway.sent.some(request => String(request.method ?? '').includes('challenge'))).toBe(false);
+    });
+  });
+
+  test('retires a challenge notice from an interrupted turn when a later turn completes', async () => {
+    let attempt = 0;
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-recover', stored_session_id: 'stored-recover' });
+      else if (request.method === 'session.resume') gateway.reply(request, { session_id: 'runtime-recover', stored_session_id: 'stored-recover' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        attempt++;
+        gateway.soon(() => {
+          if (attempt === 1) gateway.event('free_tier.challenge', { type: 'browser', url: 'https://gateway.example/recover', required: true, message: 'Solve before continuing' }, 'runtime-recover');
+          else gateway.event('message.complete', { text: 'recovered' }, 'runtime-recover');
+        });
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.challenge-recover.test', route, async () => {
+      const { hermesAdapter } = await import('./hermes.js');
+      let nativeId: string | undefined;
+      const base = { cwd: '/tmp', instructions: '', ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: (id: string) => { nativeId = id; } };
+      const controller = new AbortController(), firstChunks = [];
+      try {
+        for await (const chunk of hermesAdapter.run({ ...base, signal: controller.signal, prompt: 'blocked' })) {
+          firstChunks.push(chunk);
+          if (chunk.type === 'data-notification' && chunk.data.action === 'show') controller.abort();
+        }
+      } catch { /* The first turn is intentionally interrupted after showing the notice. */ }
+      const secondChunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, signal: new AbortController().signal, nativeId, prompt: 'recovered' })) secondChunks.push(chunk);
+      expect(firstChunks.some(chunk => chunk.type === 'data-notification' && chunk.data.action === 'show')).toBe(true);
+      expect(secondChunks.filter(chunk => chunk.type === 'data-notification' && chunk.data.action === 'clear' && chunk.data.key === 'free_tier.challenge')).toEqual([{
+        type: 'data-notification', id: 'hermes-notification-clear:free_tier.challenge', transient: true,
+        data: { action: 'clear', key: 'free_tier.challenge' },
+      }]);
+      expect(secondChunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['recovered']);
+    });
+  });
+
+  test('lets an optional free-tier challenge pass without disturbing the turn', async () => {
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-optional', stored_session_id: 'stored-optional' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => {
+          gateway.event('free_tier.challenge', {
+            type: 'browser', url: 'https://gateway.example/optional', required: false,
+            expires_in: 300, message: 'Solve this sometime', attempt: 1,
+          }, 'runtime-optional');
+          gateway.event('message.delta', { text: 'streamed anyway' }, 'runtime-optional');
+          gateway.event('message.complete', {}, 'runtime-optional');
+        });
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.challenge-optional.test', route, async () => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const base = { cwd: '/tmp', instructions: '', signal: new AbortController().signal, ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: (_id: string) => {} };
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'optional challenge' })) chunks.push(chunk);
+      expect(chunks.filter(chunk => chunk.type === 'data-notification')).toEqual([]);
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['streamed anyway']);
+    });
+  });
+
+  test('masks an unsafe or malformed free-tier challenge location but still shows the notice', async () => {
+    const unsafe = [
+      { message: 'script url', url: 'javascript:alert(1)' },
+      { message: 'credentials in url', url: 'https://user:secret@gateway.example/challenge' },
+      { message: 'not a url at all', url: 'gateway.example/challenge' },
+      { message: 'wrong type', url: { href: 'https://gateway.example/challenge' } },
+      { message: '', url: undefined },
+    ];
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-unsafe', stored_session_id: 'stored-unsafe' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => {
+          for (const [index, variant] of unsafe.entries()) gateway.event('free_tier.challenge', { type: 'browser', required: true, expires_in: 300, attempt: index + 1, ...variant }, 'runtime-unsafe');
+          gateway.event('message.complete', { text: 'still running' }, 'runtime-unsafe');
+        });
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.challenge-unsafe.test', route, async () => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const base = { cwd: '/tmp', instructions: '', signal: new AbortController().signal, ask: async () => ({ cancelled: true as const }), approve: async () => true, onNativeSession: (_id: string) => {} };
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({ ...base, prompt: 'unsafe challenge' })) chunks.push(chunk);
+      // Every variant keeps its notice, and none of them carries a link the browser could open.
+      for (const variant of unsafe) expect(chunks).toContainEqual({
+        type: 'data-notification', id: 'hermes-notification:free_tier.challenge', transient: true,
+        data: { action: 'show', text: variant.message || '需要在浏览器中完成验证后才能继续', level: 'warn', kind: 'sticky', key: 'free_tier.challenge' },
+      });
+      expect(chunks.filter(chunk => chunk.type === 'data-notification')).toHaveLength(unsafe.length + 1);
+      expect(chunks.filter(chunk => chunk.type === 'data-notification' && chunk.data.action === 'clear' && chunk.data.key === 'free_tier.challenge')).toEqual([{
+        type: 'data-notification', id: 'hermes-notification-clear:free_tier.challenge', transient: true,
+        data: { action: 'clear', key: 'free_tier.challenge' },
+      }]);
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['still running']);
+    });
+  });
 });

@@ -2,7 +2,7 @@ import type { ChatChunk, ConnectionState } from '../../shared/types.js';
 import type { ConnectionControls, ConnectionResponse, HarnessAdapter, HarnessTurn, ResolvedProfile } from './types.js';
 import type { ProfileOptions } from '../../shared/profiles.js';
 import { abortError, executableVersion, record, safeError, string, EventQueue, abortable } from './common.js';
-import { connectionActionable, normalizeConnection, redactConnection } from '../connections.js';
+import { connectionActionable, normalizeConnection, redactConnection, safeLink } from '../connections.js';
 import { HermesRpc, rpcPayload } from './hermes-server.js';
 
 type NativeRef = { sessionId: string; storedId?: string; profile?: string; submittedMessageId?: string };
@@ -11,6 +11,15 @@ const decode = (value: string): NativeRef => { if (!value.startsWith('hermes:'))
 const gatewayUrl = (profile: HarnessTurn['profile']) => profile?.config.gatewayUrl || process.env.MACARON_HERMES_URL;
 const profileName = (profile: HarnessTurn['profile']) => profile?.config.nativeProfile;
 const connections = new Map<string, HermesRpc>();
+const CHALLENGE_KEY = 'free_tier.challenge';
+// Sessions currently showing a sticky challenge notice, oldest first. Re-notifying refreshes an
+// entry so a still-blocked session is never the one evicted; a notice may never be retired at all.
+const challengeNoticeSessions = new Set<string>();
+const rememberChallengeNotice = (sessionKey: string) => {
+  if (!sessionKey) return;
+  challengeNoticeSessions.delete(sessionKey); challengeNoticeSessions.add(sessionKey);
+  if (challengeNoticeSessions.size > 1000) challengeNoticeSessions.delete(challengeNoticeSessions.values().next().value!);
+};
 const connectionKey = (turn: HarnessTurn) => `${turn.cwd}\0${gatewayUrl(turn.profile) || 'managed'}\0${profileName(turn.profile) || ''}`;
 const connectionFor = (turn: Pick<HarnessTurn, 'cwd' | 'profile'>, token?: string) => {
   const key = connectionKey(turn as HarnessTurn), existing = connections.get(key);
@@ -33,6 +42,8 @@ function hermesAnswers(answers: Record<string, string[]>, questions: { id: strin
   const multiSelect = new Set(questions.filter(question => question.multiple).map(question => question.id));
   return Object.fromEntries(Object.entries(answers).map(([id, values]) => [id, encodeAnswer(values, multiSelect.has(id))]));
 }
+/** Native display strings reach a persisted card or an on-screen notice; keep them single-line and bounded. */
+const safeText = (value: unknown, limit = 2000) => string(value).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, limit);
 function vaultHeader(params: Record<string, unknown>) {
   // `origin` is the only native field that is URL-shaped. Use its hostname rather than
   // echoing userinfo, paths, query strings or fragments into a persisted question card.
@@ -41,7 +52,7 @@ function vaultHeader(params: Record<string, unknown>) {
     const hostname = new URL(origin).hostname;
     if (hostname) return hostname;
   } catch { /* vault.code has no required origin; use its display site below. */ }
-  const site = string(params.site).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120);
+  const site = safeText(params.site, 120);
   return site || '网站';
 }
 function vaultQuestions(request: { method: string; params: Record<string, unknown> }) {
@@ -59,7 +70,18 @@ function vaultValue(method: string, response: { answers: Record<string, string[]
   if (method === 'vault.save_login') return JSON.stringify({ identifier: response.answers.identifier?.[0] || '', password: response.answers.password?.[0] || '' });
   return response.answers.code?.[0] || '';
 }
-export async function closeHermesConnections() { const values = [...connections.values()]; connections.clear(); await Promise.allSettled(values.map(value => value.close())); }
+/**
+ * A free-tier challenge blocks the native turn until it is solved in a browser, so a required one
+ * becomes a sticky notice carrying the upstream message and its location. An optional challenge is
+ * the gateway's own retry hint: it never interrupts the turn. The backend polls for the result, so
+ * there is nothing for this client to answer.
+ */
+function challengeNotification(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (payload.required !== true) return undefined;
+  return { text: safeText(payload.message) || '需要在浏览器中完成验证后才能继续', level: 'warn', kind: 'sticky', key: CHALLENGE_KEY, link: payload.url };
+}
+
+export async function closeHermesConnections() { const values = [...connections.values()]; connections.clear(); challengeNoticeSessions.clear(); await Promise.allSettled(values.map(value => value.close())); }
 
 function assertSupported(profile: HarnessTurn['profile']) {
   if (profile?.config.baseUrl || profile?.apiKey) throw new Error('Hermes uses its own profile/provider credentials; base URL and API-key overrides are not supported by the native gateway adapter');
@@ -124,6 +146,7 @@ export const hermesAdapter: HarnessAdapter = {
     const earlyConnections: Record<string, unknown>[] = [];
     const earlyNotifications: { type: 'notification.show' | 'notification.clear'; sessionId: string; payload: Record<string, unknown> }[] = [];
     let notificationSequence = 0;
+    const challengeSessionKey = () => storedId || nativeId;
     const publishNotification = (type: 'notification.show' | 'notification.clear', payload: Record<string, unknown>) => {
       if (type === 'notification.show') {
         const text = string(payload.text), level = string(payload.level), kind = string(payload.kind);
@@ -132,7 +155,12 @@ export const hermesAdapter: HarnessAdapter = {
         if (payload.ttl_ms === null || typeof payload.ttl_ms === 'number') data.ttl_ms = payload.ttl_ms;
         if (typeof payload.key === 'string') data.key = payload.key;
         if (typeof payload.id === 'string') data.id = payload.id;
+        // Masked server-side so an unsafe location never reaches the browser; the notice still shows without it.
+        const link = safeLink(payload.link);
+        if (link) data.link = link;
         const identity = data.id || data.key || `event-${++notificationSequence}`;
+        // Also remember a masked-link notice: it is on screen and still needs retiring on a later turn.
+        if (data.key === CHALLENGE_KEY) rememberChallengeNotice(challengeSessionKey());
         push([{ type: 'data-notification', id: `hermes-notification:${identity}`, data, transient: true }]);
       } else {
         const key = string(payload.key);
@@ -149,6 +177,11 @@ export const hermesAdapter: HarnessAdapter = {
     };
     const flushEarlyNotifications = () => {
       for (const event of earlyNotifications.splice(0)) if (!event.sessionId || event.sessionId === nativeId) publishNotification(event.type, event.payload);
+    };
+    // A sticky notice has no expiry of its own. A turn that reached its terminal message is the
+    // gateway saying the block is gone, which is the one chance to retire it, so do it exactly once.
+    const clearChallengeNotice = () => {
+      if (challengeNoticeSessions.delete(challengeSessionKey())) publishNotification('notification.clear', { key: CHALLENGE_KEY });
     };
     const publishConnection = (tracked: Tracked) => {
       const actionable = !turnClosed && !turn.signal.aborted && connectionActionable(tracked.state);
@@ -257,6 +290,13 @@ export const hermesAdapter: HarnessAdapter = {
         receiveNotification({ type, sessionId: sid, payload });
         return;
       }
+      // Rides the notification path on purpose: a challenge is raised around session binding, before
+      // the turn is streaming, and must survive the same early-buffer and grace-period windows.
+      if (type === 'free_tier.challenge') {
+        const notification = challengeNotification(payload);
+        if (notification) receiveNotification({ type: 'notification.show', sessionId: sid, payload: notification });
+        return;
+      }
       // Once the native turn has completed, only notification events may still be
       // delivered during the one-macrotask queue-end grace period. Do not let a
       // late error/delta reopen or fail an already completed browser turn.
@@ -280,7 +320,7 @@ export const hermesAdapter: HarnessAdapter = {
       else if (type === 'reasoning.delta' || type === 'thinking.delta') { const text = string(payload.text); if (text && !thoughtId) { thoughtId = `hermes-reasoning-${++thoughtSequence}`; push([{ type: 'reasoning-start', id: thoughtId }]); } if (text) push([{ type: 'reasoning-delta', id: thoughtId, delta: text }]); }
       else if (type === 'tool.start') { endThought(); push([{ type: 'tool-input-available', toolCallId: string(payload.tool_id), toolName: string(payload.name), input: payload.args ?? {}, dynamic: true, providerExecuted: true }]); }
       else if (type === 'tool.complete') { const id = string(payload.tool_id); push([{ type: 'tool-output-available', toolCallId: id, output: payload.result ?? payload.result_text ?? '', dynamic: true, providerExecuted: true }]); }
-      else if (type === 'message.complete') { endThought(); const text = string(payload.text); if (!streamed && text) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }, { type: 'text-delta', id: 'hermes-message', delta: text }]); } if (textStarted) push([{ type: 'text-end', id: 'hermes-message' }]); closeConnections(); done = true; endQueueSoon(); resolveDone(); }
+      else if (type === 'message.complete') { endThought(); const text = string(payload.text); if (!streamed && text) { textStarted = true; push([{ type: 'text-start', id: 'hermes-message' }, { type: 'text-delta', id: 'hermes-message', delta: text }]); } if (textStarted) push([{ type: 'text-end', id: 'hermes-message' }]); clearChallengeNotice(); closeConnections(); done = true; endQueueSoon(); resolveDone(); }
       else if (type === 'error' || type === 'connection.error') fail(new Error(string(payload.message) || 'Hermes turn failed'));
       else if (type === 'approval.request') {
         void abortable(turn.approve({ id: string(payload.request_id), tool: 'terminal', input: payload }), turn.signal)

@@ -1,4 +1,5 @@
 import { Chat } from '@ai-sdk/react';
+import { createElement } from 'react';
 import { DefaultChatTransport, type DataUIPart } from 'ai';
 import type { Artifact, ChatMessage, ConnectionCommand, ConnectionView, HarnessId, HarnessInfo, MessageData, ProviderReview, Session, SessionSummary } from '../../shared/types';
 import { toast } from 'sonner';
@@ -168,7 +169,11 @@ export class WorkspaceStore {
         const toastId = mapKey ?? (part.data.id ? `${id}\0${part.data.id}` : randomUUID());
         const duration = part.data.kind === 'sticky' || part.data.kind === 'agent' ? Infinity : part.data.kind === 'ttl' && typeof part.data.ttl_ms === 'number' && Number.isFinite(part.data.ttl_ms) ? Math.max(1, part.data.ttl_ms) : undefined;
         const forget = () => this.forgetNotificationToast(id, toastId);
-        const options = { id: toastId, duration, onDismiss: forget, onAutoClose: forget };
+        // Rendered only when the server already proved this is an absolute http(s) location.
+        const description = part.data.link
+          ? createElement('a', { href: part.data.link, target: '_blank', rel: 'noopener noreferrer', className: 'text-link break-all hover:underline' }, '打开链接')
+          : undefined;
+        const options = { id: toastId, duration, description, onDismiss: forget, onAutoClose: forget };
         if (part.data.level === 'error') toast.error(part.data.text, options);
         else if (part.data.level === 'warn') toast.warning(part.data.text, options);
         else if (part.data.level === 'success') toast.success(part.data.text, options);

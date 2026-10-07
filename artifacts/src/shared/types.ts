@@ -69,7 +69,8 @@ export interface ConnectionView extends ConnectionState {
 
 export interface ProviderReview { id: string; runId: string; sessionId: string; canContinue: boolean; scope?: string; explanation?: string; continuationMessage?: string; controlUrl?: string }
 export type AgentNotification =
-  | { action: 'show'; text: string; level: string; kind: string; ttl_ms?: number | null; key?: string | null; id?: string | null }
+  /** `link` is present only when the server already proved it is an absolute http(s) location. */
+  | { action: 'show'; text: string; level: string; kind: string; ttl_ms?: number | null; key?: string | null; id?: string | null; link?: string }
   | { action: 'clear'; key: string };
 export type MessageData = { providerReview: ProviderReview; artifact: Artifact; command: { toolCallId: string; output: string }; approval: Approval & { resolved?: boolean }; question: QuestionState; connection: ConnectionView; notification: AgentNotification; usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }; recap: { title?: string; suggestions: string[] } };
 export type ChatMessage = UIMessage<{ interrupted?: boolean; references?: PromptReference[]; referenceContext?: string }, MessageData>;
