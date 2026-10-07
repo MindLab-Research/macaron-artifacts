@@ -7,6 +7,7 @@ class Viewport extends EventTarget {
   scrollHeight = 1000;
   clientHeight = 200;
   overflowY = 'auto';
+  overscrollBehaviorY = 'auto';
   rawTop = 800;
   writes: number[] = [];
   parentElement: Viewport | null = null;
@@ -45,7 +46,7 @@ beforeEach(() => {
   globalThis.cancelAnimationFrame = id => { frames.delete(id); };
   globalThis.matchMedia = (() => media) as unknown as typeof matchMedia;
   globalThis.Element = Viewport as unknown as typeof Element;
-  globalThis.getComputedStyle = (element => ({ overflowY: (element as unknown as Viewport).overflowY })) as typeof getComputedStyle;
+  globalThis.getComputedStyle = (element => { const viewport = element as unknown as Viewport; return { overflowY: viewport.overflowY, overscrollBehaviorY: viewport.overscrollBehaviorY }; }) as typeof getComputedStyle;
   clock = mock(() => now);
   Object.defineProperty(performance, 'now', { configurable: true, value: clock });
 });
@@ -153,6 +154,7 @@ test('growth retargets a return in flight without an immediate jump or a velocit
 
 test.each([1, 0.1])('a %spx scrollbar move releases follow and is not recaptured near the bottom', delta => {
   const { element, follow, state } = setup();
+  element.input('pointerdown', { pointerType: 'mouse' });
   element.scroll(800 - delta); expect(state().following).toBe(false);
   element.dispatchEvent(new Event('scroll')); element.scrollHeight += 100; follow.update(); advance(30);
   expect(element.writes).toEqual([]); expect(element.scrollTop).toBe(800 - delta);
@@ -168,6 +170,17 @@ test('upward input takes control before scrolling; editor keys and nested panes 
   element.input('wheel', { deltaY: -0.01 }); expect(state().following).toBe(false);
   element.scrollHeight += 100; follow.update(); advance(30); expect(element.writes).toEqual([]);
   follow.resume('instant'); element.input('keydown', { key: 'PageUp' }); expect(state().following).toBe(false);
+});
+
+test('nested wheel gestures release the outer follower only when they can chain past the inner edge', () => {
+  const { element, follow, state } = setup();
+  const child = new Viewport(); child.parentElement = element;
+  element.input('wheel', { deltaY: -1 }, child); expect(state().following).toBe(true);
+  child.rawTop = 0; child.overscrollBehaviorY = 'contain';
+  element.input('wheel', { deltaY: -1 }, child); expect(state().following).toBe(true);
+  child.overscrollBehaviorY = 'auto';
+  element.input('wheel', { deltaY: -1 }, child); expect(state().following).toBe(false);
+  element.scroll(790); element.scrollHeight += 100; follow.grow(); advance(120); expect(element.scrollTop).toBe(790);
 });
 
 test('initial history stays at its beginning and future growth respects a reader who paused', () => {
@@ -188,6 +201,7 @@ test('reading downward through existing output pauses future growth until the re
 
 test('when a collapse removes all hidden history, future growth may follow again', () => {
   const { element, follow, state } = setup();
+  element.input('pointerdown', { pointerType: 'mouse' });
   element.scroll(100); expect(state().following).toBe(false);
   element.scrollHeight = 100; element.rawTop = 0; follow.update();
   expect(state().following).toBe(true);
@@ -235,6 +249,29 @@ test('target shortening clamps stored motion to the actual range without droppin
   element.scrollHeight = 600; follow.update(); advance(); expect(element.scrollTop).toBeGreaterThan(20);
 });
 
+test('a layout shrink and regrowth before observation cannot masquerade as reader input', () => {
+  const { element, follow, state } = setup();
+  // The browser clamps during the short layout, but scroll/resize delivery only sees the later larger one.
+  element.scrollHeight = 400; element.rawTop = 200;
+  element.scrollHeight = 1400; element.dispatchEvent(new Event('scroll')); follow.update();
+  expect(state().following).toBe(true);
+  advance(120); expect(element.scrollTop).toBe(1200);
+  element.scrollHeight = 1700; follow.grow(); advance(120);
+  expect(element.scrollTop).toBe(1500); expect(state().following).toBe(true);
+});
+
+test('scrollbar input stops an in-flight return without claiming content or nested-pane clicks', () => {
+  const { element, follow, state } = setup();
+  element.scrollHeight += 400; follow.update(); advance(4);
+  const child = new Viewport(); child.parentElement = element;
+  element.input('pointerdown', { pointerType: 'mouse' }, child); expect(state().following).toBe(true);
+  element.input('pointerdown', { pointerType: 'touch' }); expect(state().following).toBe(true);
+  element.input('pointerdown', { pointerType: 'mouse' }); const stopped = element.scrollTop;
+  expect(state().following).toBe(false); expect(frames.size).toBe(0);
+  element.scrollHeight += 400; follow.grow(); advance(120); expect(element.scrollTop).toBe(stopped);
+  element.scroll(1600); expect(state().following).toBe(true);
+});
+
 test('elastic rebound and growth during overscroll never write until native scrolling settles', () => {
   const { element, follow, state } = setup();
   element.scroll(850); element.scrollHeight += 20; follow.update(); advance(20);
@@ -263,9 +300,23 @@ test('touch interrupts motion without preventing native scrolling and explicit r
   element.scroll(-20); follow.resume('instant'); expect(element.scrollTop).toBe(1300);
 });
 
+test('touch at a nested edge takes ownership only when the gesture can chain to this viewport', () => {
+  const { element, follow, state } = setup();
+  const child = new Viewport(); child.parentElement = element; child.rawTop = 0; child.overscrollBehaviorY = 'contain';
+  element.input('touchstart', { touches: [{ clientY: 200 }] }, child);
+  element.input('touchmove', { touches: [{ clientY: 230 }] }, child); expect(state().following).toBe(true);
+  element.input('touchend', {});
+  child.overscrollBehaviorY = 'auto';
+  element.input('touchstart', { touches: [{ clientY: 200 }] }, child);
+  element.input('touchmove', { touches: [{ clientY: 230 }] }, child); expect(state().following).toBe(false);
+  element.scroll(740); element.input('touchend', {}); element.scrollHeight += 100; follow.grow(); advance(120);
+  expect(element.scrollTop).toBe(740); expect(frames.size).toBe(0);
+});
+
 test('cleanup cancels pending frames, restores scroll anchoring and removes input listeners', () => {
   const { element, follow, state } = setup();
   element.scrollHeight += 100; follow.update(); expect(element.style.overflowAnchor).toBe('none');
   follow.destroy(); expect(frames.size).toBe(0); expect(element.style.overflowAnchor).toBe('auto');
   element.input('wheel', { deltaY: -1 }); expect(state().following).toBe(true);
+  element.input('pointerdown', { pointerType: 'mouse' }); expect(state().following).toBe(true);
 });

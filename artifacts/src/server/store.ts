@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readUIMessageStream } from 'ai';
+import { sessionActivity } from '../shared/session-activity.js';
 import type { ChatChunk, ChatMessage, Session, SessionSummary } from '../shared/types.js';
 import { redactConnection } from './connections.js';
 
@@ -47,7 +48,7 @@ export class SessionStore {
     }
     this.sessions.set(session.id, session);
   }
-  list(): SessionSummary[] { return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(({ messages: _, ...summary }) => summary); }
+  list(): SessionSummary[] { return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(session => { const { messages: _, ...summary } = session; return { ...summary, activity: sessionActivity(session) }; }); }
   async save(session: Session) {
     // Metadata and the next user turn can save the same object concurrently; serialize
     // atomic replacements per session so a slower write cannot resurrect stale state.

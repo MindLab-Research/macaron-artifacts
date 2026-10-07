@@ -1,3 +1,4 @@
+import { sessionActivity } from '../shared/session-activity.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -150,7 +151,7 @@ export async function createArtifactsServer(options: { directory: string; instru
           finally { deletingProfiles.delete(id); }
         }
       }
-      if (url.pathname === '/api/sessions' && req.method === 'GET') return json(res, store.list());
+      if (url.pathname === '/api/sessions' && req.method === 'GET') return json(res, store.list().map(summary => ({ ...summary, activity: sessionActivity(store.sessions.get(summary.id)!, active.get(summary.id)) })));
       if (url.pathname === '/api/sessions' && req.method === 'POST') {
         const input = await body(req), harness = input.harness as HarnessId;
         if (!Object.hasOwn(harnesses, harness) || !harnesses[harness]) return json(res, { error: 'Unsupported harness.' }, 400);
@@ -168,7 +169,7 @@ export async function createArtifactsServer(options: { directory: string; instru
       if (segments[0] === 'api' && segments[1] === 'sessions' && segments[2]) {
         const session = store.sessions.get(segments[2]);
         if (!session) return json(res, { error: 'Session not found.' }, 404);
-        if (segments.length === 3 && req.method === 'GET') return json(res, session);
+        if (segments.length === 3 && req.method === 'GET') return json(res, { ...session, activity: sessionActivity(session, active.get(session.id)) });
         if (segments.length === 3 && req.method === 'DELETE') {
           if (claims.has(session.id)) return json(res, { error: 'This session is being updated.' }, 409);
           claims.add(session.id);
