@@ -9,8 +9,8 @@ minimumReleaseAgeExclude:
   - '@openclaw/gateway-client@2026.9.3'
   - '@openclaw/gateway-protocol@2026.9.3'
   # Reviewed GenUI releases replace the pinned previews before their 24-hour release-age cutoff.
-  - 'partial-react@0.0.7'
-  - 'partial-tsx@0.0.4'
+  - 'partial-react@0.0.8'
+  - 'partial-tsx@0.0.5'
   # Pi SDK 0.87.0 upgrades for issue #252 transcript context compatibility
   - '@earendil-works/chord@0.87.0'
   - '@earendil-works/pi-agent-core@0.87.0'

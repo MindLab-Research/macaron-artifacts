@@ -10,7 +10,7 @@ UI4A lets a harness produce a real React interface alongside its answer. The sam
 - **Inline:** a complete module in a fenced `ui4a/tsx` block renders inside the assistant message as its source arrives.
 - **Canvas:** `.artifacts/canvases/<id>.ui4a.tsx` opens in the side panel. Supporting `.tsx`, `.ts`, `.jsx`, `.js`, and `.json` modules resolve through explicit relative imports.
 
-`artifacts/src/web/ui4a/Ui4aSurface.tsx` feeds source to `partial-react@0.0.6`. The renderer uses `pushCode`/`finish`, preserves the last good frame while syntax is incomplete, and keeps a shared React instance so state survives incremental updates.
+`artifacts/src/web/ui4a/Ui4aSurface.tsx` feeds source to `partial-react@0.0.8`. The renderer uses `pushCode`/`finish`, preserves the last good frame while syntax is incomplete, and keeps a shared React instance so state survives incremental updates.
 
 ## Host modules
 

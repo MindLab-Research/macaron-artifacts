@@ -177,3 +177,7 @@ html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
 }
+
+.headline-word { display: inline-block; white-space: pre; animation: headline-word .7s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes headline-word { from { opacity: 0; filter: blur(3px); transform: translateY(var(--y, .14em)); } }
+@media (prefers-reduced-motion: reduce) { .headline-word { animation: none; } }

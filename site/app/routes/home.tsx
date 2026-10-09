@@ -30,17 +30,25 @@ export default function Home() {
   return (
     <HomeLayout {...baseOptions()}>
       <div className="site:flex site:flex-col site:items-center site:flex-1 site:px-4">
-        <section className="site:flex site:flex-col site:items-center site:text-center site:max-w-2xl site:pt-20 site:pb-16">
-          <span className="site:inline-flex site:items-center site:gap-1.5 site:rounded-full site:border site:px-3 site:py-1 site:text-xs site:text-fd-muted-foreground site:mb-6"><Terminal className="site:size-3.5" /> Claude Code, Codex, OpenCode, pi, Hermes &amp; OpenClaw</span>
-          <h1 className="site:text-4xl site:sm:text-5xl site:font-bold site:mb-4">Macaron Artifacts</h1>
-          <p className="site:text-fd-muted-foreground site:text-lg site:mb-8">One local WebUI for your coding harnesses. Stream conversations and interactive UI with Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw.</p>
-          <div className="site:flex site:flex-wrap site:items-center site:justify-center site:gap-3">
-            <Link className="site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-full site:font-medium site:px-5 site:py-2.5 site:transition-opacity site:hovered:opacity-90" to="/docs" onClick={() => track('cta_click', { target: 'docs', section: 'hero' })}>Read the Docs</Link>
-            <Link className="site:text-sm site:border site:rounded-full site:font-medium site:px-5 site:py-2.5 site:transition-colors site:hovered:bg-fd-accent site:hovered:text-fd-accent-foreground" to="/docs/usage" onClick={() => track('cta_click', { target: 'quick-start', section: 'hero' })}>Quick Start</Link>
+        <section className="site:grid site:w-full site:max-w-6xl site:items-center site:gap-12 site:pt-20 site:pb-24 site:lg:grid-cols-[1.25fr_1fr] site:lg:gap-16">
+          <div className="site:min-w-0">
+            <span className="site:inline-flex site:items-center site:gap-1.5 site:rounded-full site:border site:px-3 site:py-1 site:text-xs site:text-fd-muted-foreground site:mb-8"><Terminal className="site:size-3.5" /> Claude Code, Codex, OpenCode, pi, Hermes &amp; OpenClaw</span>
+            <h1 className="site:text-[clamp(40px,4.6vw,66px)] site:font-bold site:leading-[1.04] site:tracking-[-0.035em]">
+              {['Streams like text.', 'Works like software.'].map((line, i) => (
+                <span key={line} className={`site:block ${i ? 'site:text-genui' : ''}`}>{line.split(' ').map((word, j) => <span key={j} data-w={i * 3 + j} className="headline-word">{word} </span>)}</span>
+              ))}
+            </h1>
+            {/* Runs before first paint, so each visit gets its own order; a separate sheet keeps the hydrated markup untouched.
+                Later words draw from a wider range, so earlier ones tend to land first without a fixed order. */}
+            <script dangerouslySetInnerHTML={{ __html: `document.head.append(Object.assign(document.createElement('style'), { textContent: [0, 1, 2, 3, 4, 5].map(i => { const t = Math.random() * (i + 1); return '.headline-word[data-w="' + i + '"]{animation-delay:' + t * 90 + 'ms;animation-duration:' + (t * 60 + 500) + 'ms;--y:' + (0.08 + Math.random() * 0.1) + 'em}'; }).join('') }))` }} />
+            <p className="site:mt-6 site:max-w-xl site:text-fd-muted-foreground site:text-lg">One local WebUI for your coding harnesses. Replies can be interfaces that work while they stream — in the conversation, or in a Canvas beside it.</p>
+            <div className="site:mt-8 site:flex site:flex-wrap site:items-center site:gap-3">
+              <Link className="site:text-sm site:bg-fd-primary site:text-fd-primary-foreground site:rounded-full site:font-medium site:px-5 site:py-2.5 site:transition-opacity site:hovered:opacity-90" to="/docs" onClick={() => track('cta_click', { target: 'docs', section: 'hero' })}>Read the Docs</Link>
+              <Link className="site:text-sm site:border site:rounded-full site:font-medium site:px-5 site:py-2.5 site:transition-colors site:hovered:bg-fd-accent site:hovered:text-fd-accent-foreground" to="/docs/usage" onClick={() => track('cta_click', { target: 'quick-start', section: 'hero' })}>Quick Start</Link>
+            </div>
           </div>
+          <div className="site:min-w-0"><ChatShowcase /></div>
         </section>
-
-        <section className="site:w-full site:max-w-xl site:pb-20"><ChatShowcase /></section>
 
         <section className="site:w-full site:max-w-3xl site:pb-20">
           <div className="site:mb-6 site:text-center"><h2 className="site:text-2xl site:font-semibold site:mb-1">Install</h2><p className="site:text-fd-muted-foreground">One package, one local server. Choose the harness inside the app.</p></div>

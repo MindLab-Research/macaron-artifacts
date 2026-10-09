@@ -34,7 +34,7 @@
     "katex": "0.16.47",
     "lucide-react": "1.44.0",
     "partial-json": "0.1.7",
-    "partial-react": "0.0.7",
+    "partial-react": "0.0.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "3.10.1",
