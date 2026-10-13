@@ -2,15 +2,16 @@
 
 **Streams like text. Works like software.**
 
-[Website](https://artifacts.macaron.im) · [Docs](https://artifacts.macaron.im/docs) · [Quick start](https://artifacts.macaron.im/docs/usage) · [llms.txt](https://artifacts.macaron.im/llms.txt)
+[Website](https://artifacts.macaron.im) · [Docs](https://artifacts.macaron.im/docs) · [Quick start](https://artifacts.macaron.im/docs/usage) · [UI4A paper](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui) · [Playground](https://genui.macaron.im) · [llms.txt](https://artifacts.macaron.im/llms.txt)
 
-Macaron Artifacts is one local React WebUI for coding agents — Claude Code, Codex, OpenCode (v1 and v2), pi, Hermes, and OpenClaw. Install the `macaron-artifacts` package, start one local server, and choose the harness per conversation. Every harness gets the same chat, approvals, Canvas, and Shiki themes.
+Generative UI for the coding agent you already use. Macaron Artifacts is a local WebUI where [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode) (v1 and v2), [pi](https://github.com/earendil-works/pi), [Hermes](https://github.com/NousResearch/hermes-agent), and [OpenClaw](https://github.com/openclaw/openclaw) answer with working interfaces — a chart you can scrub, a form you can fill in, an explorer you can click through — rendered while the reply is still streaming. One package, one server; pick the harness per conversation, and every harness shares the same chat, approvals, Canvas, and themes.
 
-Agent replies can be live interfaces instead of prose. With **UI4A** (UI for Agent, from [Mind Lab](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui)), the agent writes ordinary React and the runtime enforces the boundaries:
+It is the community edition of **UI4A** (UI for Agent) from [Mind Lab](https://www.mindlab.im). Raw HTML gives the model freedom with no contract; schema protocols such as [A2UI](https://a2ui.org) give control but cap what it can express. UI4A sits between them: the agent writes ordinary React with imports, components, and state — code it already writes well — and the runtime decides what that code can reach. On Mind Lab's 48-case gallery that takes about 45% fewer output tokens than raw HTML.
 
-- **Inline** — a ```` ```ui4a/tsx ```` block renders between paragraphs while its source is still streaming, and you can click, type, and drag before it finishes.
-- **Canvas** — a file at `.artifacts/canvases/<name>.ui4a.tsx` opens beside the conversation and stays across turns, with relative imports and persistent state.
-- **Components** — a bundled `$ui4a/ui` library with KaTeX and charts, themed by the app's own tokens.
+- **Inline** — a ```` ```ui4a/tsx ```` block renders between paragraphs as its source arrives, and stays interactive: later chunks don't reset what you've clicked or typed.
+- **Canvas** — a file at `.artifacts/canvases/<name>.ui4a.tsx` opens beside the conversation and persists across turns, with relative imports and saved state.
+- **Batteries included** — the bundled `$ui4a/ui` library, KaTeX, charts, and Headless UI, plus any other npm package through the CDN, all themed by the app's own tokens.
+- **Wired to the host** — scoped chat, state, and file capabilities let a button start the next turn or a form save to `.artifacts`.
 
 ## Install and run
 
@@ -119,3 +120,11 @@ pnpm start
 Development serves the UI on `http://127.0.0.1:43861` and API on `http://127.0.0.1:43860`; `WEB_PORT` and `MACARON_PORT` override them. Production serves both from one port.
 
 See [the application guide](artifacts/README.md) for module boundaries, streaming contracts, and validation.
+
+## Related
+
+- [UI4A: A Component-Native Harness for Generative UI](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui) — the design, the action contract, and the token benchmark behind the runtime.
+- [Macaron GenUI Playground](https://genui.macaron.im) — try UI4A streaming in the browser across React, Vue, Svelte, and SolidJS.
+- [dsh-generative-ui](https://github.com/MindLab-Research/dsh-generative-ui) — the same harness as a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)'s web client.
+- [`partial-react`](https://www.npmjs.com/package/partial-react) — the progressive renderer that keeps the last good frame while TSX is still incomplete.
+- [Macaron](https://macaron.im) — the personal agent from Mind Lab that UI4A was built for.
