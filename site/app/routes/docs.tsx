@@ -11,7 +11,7 @@ import {
 import { getPageMarkdownUrl, source } from '@/lib/source';
 import browserCollections from 'collections/browser';
 import { baseOptions } from '@/lib/layout.shared';
-import { gitConfig } from '@/lib/shared';
+import { appName, gitConfig, siteUrl } from '@/lib/shared';
 import { useFumadocsLoader } from 'fumadocs-core/source/client';
 import { useMDXComponents } from '@/components/mdx';
 import { SidebarHotkey } from '@/components/sidebar-hotkey';
@@ -23,6 +23,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 
   return {
     path: page.path,
+    url: page.url,
     markdownUrl: getPageMarkdownUrl(page).url,
     pageTree: await source.serializePageTree(source.getPageTree()),
   };
@@ -35,15 +36,23 @@ const clientLoader = browserCollections.docs.createClientLoader({
     {
       markdownUrl,
       path,
+      url,
     }: {
       markdownUrl: string;
       path: string;
+      url: string;
     },
   ) {
     return (
       <DocsPage toc={toc}>
-        <title>{frontmatter.title}</title>
+        <title>{`${frontmatter.title} | ${appName}`}</title>
         <meta name="description" content={frontmatter.description} />
+        <link rel="canonical" href={`${siteUrl}${url}`} />
+        <meta property="og:type" content="article" />
+        <meta property="og:site_name" content={appName} />
+        <meta property="og:url" content={`${siteUrl}${url}`} />
+        <meta property="og:title" content={`${frontmatter.title} | ${appName}`} />
+        <meta property="og:description" content={frontmatter.description} />
         <DocsTitle>{frontmatter.title}</DocsTitle>
         <DocsDescription>{frontmatter.description}</DocsDescription>
         <div className="site:flex site:flex-row site:gap-2 site:items-center site:border-b site:-mt-4 site:pb-6">
@@ -62,7 +71,7 @@ const clientLoader = browserCollections.docs.createClientLoader({
 });
 
 export default function Page({ loaderData }: Route.ComponentProps) {
-  const { pageTree, path, markdownUrl } = useFumadocsLoader(loaderData);
+  const { pageTree, path, url, markdownUrl } = useFumadocsLoader(loaderData);
 
   return (
     <DocsLayout {...baseOptions()} tree={pageTree}>
@@ -70,6 +79,7 @@ export default function Page({ loaderData }: Route.ComponentProps) {
       {clientLoader.useContent(loaderData.path, {
         markdownUrl,
         path,
+        url,
       })}
     </DocsLayout>
   );

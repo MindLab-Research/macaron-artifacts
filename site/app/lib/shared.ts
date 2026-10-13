@@ -1,4 +1,5 @@
 export const appName = 'Macaron Artifacts';
+export const siteUrl = 'https://artifacts.macaron.im';
 export const docsRoute = '/docs';
 export const docsImageRoute = '/og/docs';
 export const docsContentRoute = '/llms.mdx/docs';

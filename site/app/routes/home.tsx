@@ -9,6 +9,7 @@ import { baseOptions } from '@/lib/layout.shared';
 import { track, type SiteEvents } from '@/lib/telemetry';
 import ChatShowcase from '@/components/chat-showcase';
 import { syntaxThemes } from '@/lib/palettes';
+import { appName, siteUrl } from '@/lib/shared';
 
 function CommandCopyButton({ code, on }: { code: string; on: SiteEvents['command_copy'] }) {
   const [checked, onClick] = useCopyButton(() => { navigator.clipboard.writeText(code); track('command_copy', on); });
@@ -20,7 +21,21 @@ function Command({ code }: { code: string }) {
 }
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: 'Macaron Artifacts' }, { name: 'description', content: 'One local WebUI for six coding harnesses, streaming conversations, generated UI, and shared Shiki themes.' }];
+  const title = 'Macaron Artifacts — Generative UI WebUI for Claude Code, Codex, and OpenCode';
+  const description = 'One local WebUI for Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw. Agent replies render as live React interfaces with UI4A — streams like text, works like software.';
+  return [
+    { title },
+    { name: 'description', content: description },
+    { tagName: 'link', rel: 'canonical', href: `${siteUrl}/` },
+    { property: 'og:type', content: 'website' },
+    { property: 'og:site_name', content: appName },
+    { property: 'og:url', content: `${siteUrl}/` },
+    { property: 'og:title', content: title },
+    { property: 'og:description', content: description },
+    { name: 'twitter:card', content: 'summary' },
+    { name: 'twitter:title', content: title },
+    { name: 'twitter:description', content: description },
+  ];
 }
 
 // The package name and CLI stay the same whichever harness a conversation uses.
