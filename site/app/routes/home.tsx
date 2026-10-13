@@ -39,9 +39,6 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-// The package name and CLI stay the same whichever harness a conversation uses.
-const PKG = `https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@${__COMMIT_SHA__}`;
-
 export default function Home() {
   return (
     <HomeLayout {...baseOptions()}>
@@ -68,8 +65,8 @@ export default function Home() {
 
         <section className="site:w-full site:max-w-3xl site:pb-20">
           <div className="site:mb-6 site:text-center"><h2 className="site:text-2xl site:font-semibold site:mb-1">Install</h2><p className="site:text-fd-muted-foreground">One package, one local server. Choose the harness inside the app.</p></div>
-          <Command code={`bunx macaron-artifacts@${PKG}`} />
-          <p className="site:mt-3 site:text-sm site:text-fd-muted-foreground">Requires Node.js 22.19 or newer. Use an authenticated Claude Code, Codex, or OpenCode CLI, or the included pi SDK with your local pi configuration. The preview package is pinned to this build's commit.</p>
+          <Command code="bunx macaron-artifacts" />
+          <p className="site:mt-3 site:text-sm site:text-fd-muted-foreground">Requires Node.js 22.19 or newer. Claude Code and pi run on bundled SDKs; Codex and OpenCode use their authenticated native CLI. Or install it globally with <code>npm install -g macaron-artifacts</code>.</p>
           <p className="site:mt-3 site:text-sm site:text-fd-muted-foreground">Open <a className="site:text-fd-foreground site:underline site:underline-offset-4" href="http://127.0.0.1:43860">http://127.0.0.1:43860</a>, then create a conversation with your harness and workspace. See <Link className="site:text-fd-foreground site:underline site:underline-offset-4" to="/docs/usage">Quick Start</Link> for installation and configuration.</p>
         </section>
 

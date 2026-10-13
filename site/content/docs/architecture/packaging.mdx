@@ -10,10 +10,10 @@ The repository root publishes exactly one package: **`macaron-artifacts`**. Its 
 The package contains the launcher, the prebuilt `artifacts/dist` server and WebUI, the generated UI4A skill, and the current README. Starting the installed package does not invoke Vite or compile source files.
 
 ```sh
-bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
+bunx macaron-artifacts
 ```
 
-Use a SHA from a successful package preview build. The launcher serves UI and API on `http://127.0.0.1:43860` by default and accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`. CLI options override their environment variables. Set `MACARON_PASSWORD` or pass `--password` for password protection; non-loopback listening or a non-loopback public origin requires it. See [remote access](/docs/usage#password-protection-and-remote-access) for SSH forwarding and HTTPS reverse proxy configuration.
+The launcher serves UI and API on `http://127.0.0.1:43860` by default and accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`. CLI options override their environment variables. Set `MACARON_PASSWORD` or pass `--password` for password protection; non-loopback listening or a non-loopback public origin requires it. See [remote access](/docs/usage#password-protection-and-remote-access) for SSH forwarding and HTTPS reverse proxy configuration.
 
 ## Runtime boundary
 

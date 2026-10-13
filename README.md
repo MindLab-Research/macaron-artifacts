@@ -15,22 +15,22 @@ It is the community edition of **UI4A** (UI for Agent) from [Mind Lab](https://w
 
 ## Install and run
 
-Requires Node.js 22.19 or newer. Claude Code, Codex, and OpenCode use their installed, authenticated native CLI and local configuration. The pi SDK is included in the package and reads your local `~/.pi/agent` configuration; a separate pi executable is not required.
+Requires Node.js 22.19 or newer. Claude Code and pi run on SDKs bundled in the package; Codex and OpenCode use their installed, authenticated native CLI. pi reads your local `~/.pi/agent` configuration.
 
-Run a commit's preview package directly:
+Run it directly:
 
 ```sh
-bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
+bunx macaron-artifacts
 ```
 
-Or install that same package globally:
+Or install it globally:
 
 ```sh
-npm install -g https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
+npm install -g macaron-artifacts
 macaron-artifacts
 ```
 
-Replace `<sha>` with the commit from a successful [package preview build](https://github.com/MindLab-Research/macaron-artifacts/actions/workflows/pkg-pr-new.yml). Open `http://127.0.0.1:43860`, create a conversation, and choose its harness and workspace. An empty model field uses the harness default; for OpenCode and pi, enter an optional override as `provider/model`.
+Open `http://127.0.0.1:43860`, create a conversation, and choose its harness and workspace. An empty model field uses the harness default; for OpenCode and pi, enter an optional override as `provider/model`.
 
 To connect the hosted WebUI, start the server with `macaron-artifacts --pair`. Open [artifacts.macaron.im/connect](https://artifacts.macaron.im/connect), enter the address and the one-time code printed in the terminal, and the browser will open the local WebUI. Pairing codes expire after ten minutes and are consumed once. For a server reached through SSH, forward its loopback port first: `ssh -N -L 43860:127.0.0.1:43860 user@host`, then use `http://127.0.0.1:43860` in the connect form.
 

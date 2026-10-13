@@ -7,10 +7,10 @@ A single React WebUI for native coding harnesses. Claude Code, Codex, OpenCode, 
 The only published package and CLI is `macaron-artifacts`. Choose Claude Code, Codex, OpenCode, pi, Hermes, or OpenClaw inside the application; installing another WebUI package is not required to switch harnesses. Node.js 22.19 or newer is required.
 
 ```sh
-bunx macaron-artifacts@https://pkg.pr.new/MindLab-Research/macaron-artifacts/macaron-artifacts@<sha>
+bunx macaron-artifacts
 ```
 
-Use the SHA from a successful package preview build, then open `http://127.0.0.1:43860`. For a persistent installation, install that same package URL with `npm install -g` and run `macaron-artifacts`. The launcher accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`; CLI options override their environment variables.
+Then open `http://127.0.0.1:43860`. For a persistent installation, run `npm install -g macaron-artifacts` and start `macaron-artifacts`. The launcher accepts `--port`, `--data-dir`, `--host`, `--password`, `--public-origin`, and `--pair`; CLI options override their environment variables.
 
 ## Password protection and remote access
 
