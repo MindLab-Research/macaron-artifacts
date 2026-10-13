@@ -1,7 +1,9 @@
 {
   "name": "macaron-artifacts",
   "version": "0.1.0",
-  "description": "One local WebUI for coding harnesses and streaming UI4A artifacts.",
+  "description": "Generative UI for Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw: one local WebUI where agent replies render as live UI4A React interfaces.",
+  "keywords": ["generative-ui", "genui", "ui4a", "artifacts", "claude-code", "codex", "opencode", "pi", "hermes", "openclaw", "coding-agent", "webui", "react", "streaming"],
+  "homepage": "https://artifacts.macaron.im",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
