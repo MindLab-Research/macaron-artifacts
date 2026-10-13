@@ -98,7 +98,7 @@ CLI options override their environment variables.
 
 OpenCode v1 and v2 appear side by side in **New conversation** and **Profiles**. Existing `opencode` sessions and Profiles remain v1; `opencode-v2` is independent. Each executable is major-checked before startup, so selecting the wrong generation fails immediately with the relevant environment variable. Native configuration and credentials remain untouched. The adapters pin `@opencode-ai/sdk@1.18.29` for v1 (its `/v2/client` export is not native v2) and `@opencode/client@2.0.20` for native v2.
 
-Open **Profiles** in the sidebar to configure models, reasoning effort, service endpoints and credentials. Codex Profiles use its native `$CODEX_HOME/<name>.config.toml` files (current Codex CLI); Claude Code, OpenCode and pi use app-managed overrides. API keys and tokens are stored in a private local file under the data directory and are never returned to the browser. See [Profiles](artifacts/README.md#profiles) for supported settings and inheritance.
+Open **Profiles** in the sidebar to configure models, reasoning effort, service endpoints and credentials. Codex Profiles use its native `$CODEX_HOME/<name>.config.toml` files (current Codex CLI); Claude Code, OpenCode and pi use app-managed overrides. API keys and tokens are stored in a private local file under the data directory and are never returned to the browser. See [Profiles](https://github.com/MindLab-Research/macaron-artifacts/blob/main/artifacts/README.md#profiles) for supported settings and inheritance.
 
 You can also inherit your CLI's configuration. For Claude gateways, that includes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`. Variables injected only by a shell alias do not reach a separately launched app.
 
@@ -119,7 +119,7 @@ pnpm start
 
 Development serves the UI on `http://127.0.0.1:43861` and API on `http://127.0.0.1:43860`; `WEB_PORT` and `MACARON_PORT` override them. Production serves both from one port.
 
-See [the application guide](artifacts/README.md) for module boundaries, streaming contracts, and validation.
+See [the application guide](https://github.com/MindLab-Research/macaron-artifacts/blob/main/artifacts/README.md) for module boundaries, streaming contracts, and validation.
 
 ## Related
 
