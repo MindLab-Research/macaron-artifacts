@@ -1,17 +1,26 @@
 ---
 title: Introduction
-description: One macaron-artifacts package for six coding harnesses, streaming conversations, and generated UI.
+description: Macaron Artifacts is one local WebUI for Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw, where agent replies render as live UI4A interfaces.
 ---
 
 **Macaron Artifacts** is one local WebUI for Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw. Install one package, start one server, and choose the harness per conversation.
+
+Replies don't have to be prose. Agents answer with **UI4A** — UI for Agent — React components that stream like text and work like software. Rather than coaxing the model into a fixed UI schema, UI4A lets it write ordinary frontend code and has the runtime enforce the boundaries; the reasoning and benchmarks are in [UI4A: A Component-Native Harness for Generative UI](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui).
 
 ## What You Get
 
 <Cards>
   <Card title="Shared Interface" href="/docs/usage">Choose a harness, workspace, Profile, and model in the same conversation interface.</Card>
   <Card title="Live Chat" href="/docs/usage">Stream native text, reasoning, tool input, approvals, and command output as each harness exposes them.</Card>
-  <Card title="Generated UI" href="/docs/usage">Render inline `ui4a/tsx` blocks and persistent `.artifacts` Canvas files with the same React runtime.</Card>
+  <Card title="Generated UI" href="/docs/architecture/genui">Render inline `ui4a/tsx` blocks and persistent `.artifacts` Canvas files with the same React runtime.</Card>
   <Card title="Shared Themes" href="/docs/usage">Shiki theme families drive syntax highlighting, interface tokens, and generated components.</Card>
 </Cards>
+
+## Why UI4A
+
+- **Streaming render** — a component paints while its source is still arriving, so the first useful pixels land long before the reply ends.
+- **State that survives** — the interface is interactive from the first frame; later chunks don't reset what you've clicked, typed, or dragged.
+- **Components and npm** — use the bundled `$ui4a/ui` library, KaTeX, charts, and Headless UI, or import other npm packages through the CDN. Everything follows the app's theme tokens.
+- **Wired to the host** — generated components get scoped chat, state, and file capabilities, so a button can start the next turn or a form can save to `.artifacts`.
 
 Head to [Usage](/docs/usage) to install and run the WebUI, or read [Architecture](/docs/architecture/overview) for the current implementation.
