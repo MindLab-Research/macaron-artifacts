@@ -2,6 +2,7 @@ import type { Route } from './+types/home';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { Card, Cards } from 'fumadocs-ui/components/card';
 import { DynamicCodeBlock } from 'fumadocs-ui/components/dynamic-codeblock';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { useCopyButton } from 'fumadocs-ui/utils/use-copy-button';
 import { Link } from 'react-router';
 import { Check, Clipboard, MonitorPlay, MessagesSquare, SlidersHorizontal, Wand2, Layers, Terminal } from 'lucide-react';
@@ -65,8 +66,11 @@ export default function Home() {
 
         <section className="site:w-full site:max-w-3xl site:pb-20">
           <div className="site:mb-6 site:text-center"><h2 className="site:text-2xl site:font-semibold site:mb-1">Install</h2><p className="site:text-fd-muted-foreground">One package, one local server. Choose the harness inside the app.</p></div>
-          <Command code="bunx macaron-artifacts" />
-          <p className="site:mt-3 site:text-sm site:text-fd-muted-foreground">Requires Node.js 22.19 or newer. Claude Code and pi run on bundled SDKs; Codex and OpenCode use their authenticated native CLI. Or install it globally with <code>npm install -g macaron-artifacts</code>.</p>
+          <Tabs items={['Latest', 'Nightly']}>
+            <Tab><Command code="bunx macaron-artifacts" /></Tab>
+            <Tab><Command code={`bunx https://pkg.pr.new/macaron-artifacts@${__COMMIT_SHA__}`} /></Tab>
+          </Tabs>
+          <p className="site:mt-3 site:text-sm site:text-fd-muted-foreground">Requires Node.js 22.19 or newer. Claude Code and pi run on bundled SDKs; Codex and OpenCode use their authenticated native CLI. Or install it globally with <code>npm install -g macaron-artifacts</code>. Nightly is the <code>main</code> build this site was deployed from.</p>
           <p className="site:mt-3 site:text-sm site:text-fd-muted-foreground">Open <a className="site:text-fd-foreground site:underline site:underline-offset-4" href="http://127.0.0.1:43860">http://127.0.0.1:43860</a>, then create a conversation with your harness and workspace. See <Link className="site:text-fd-foreground site:underline site:underline-offset-4" to="/docs/usage">Quick Start</Link> for installation and configuration.</p>
         </section>
 
