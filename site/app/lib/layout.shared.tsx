@@ -9,6 +9,11 @@ export function baseOptions(): BaseLayoutProps {
       // JSX supported
       title: appName,
     },
+    links: [
+      { text: 'Docs', url: '/docs' },
+      { text: 'UI4A Paper', url: 'https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui', external: true },
+      { text: 'Playground', url: 'https://genui.macaron.im', external: true },
+    ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
 }

@@ -29,6 +29,42 @@ Use a SHA from a successful package preview build. The launcher serves UI and AP
 
 A new harness implements `HarnessAdapter` and registers its capabilities. It does not add another package, launcher, SPA, sidebar, or Canvas path.
 
+## npm releases
+
+`.github/workflows/publish.yml` publishes stable `v*` tags using npm Trusted Publishing. The tag must match the root `package.json` version and point to a commit already on `main`. The workflow runs type checks and tests, builds a tarball, installs and starts that tarball in isolation, then publishes the same file to npm's `latest` tag with provenance. Releases run serially without cancelling an active publish; prerelease versions are rejected.
+
+Before the first automated release:
+
+1. Run `npm login --registry=https://registry.npmjs.org` and complete browser authentication.
+2. From the repository root, run the commands below to publish the tested tarball. This first manual release creates the npm package so its publisher can be configured.
+3. In the npm package settings, add a GitHub Actions trusted publisher with organization `mindverse-ltd`, repository `macaron-artifacts`, workflow filename `publish.yml`, and allowed action `npm publish`. Leave the environment name empty; this workflow does not use a GitHub environment.
+
+```sh
+(
+set -eu
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+release_dir="$(mktemp -d)"
+npm pack --pack-destination "$release_dir"
+release_version="$(node -p 'require("./package.json").version')"
+MACARON_PACKAGE_SOURCE="$release_dir/macaron-artifacts-$release_version.tgz" pnpm test:package
+npm publish "$release_dir/macaron-artifacts-$release_version.tgz"
+)
+```
+
+Subsequent releases need only a new root package version committed to `main` and the matching `v<version>` tag pushed to GitHub. Each version can be published once; do not rerun a successful publish for that version. No npm token secret is required. GitHub-hosted runners and npm 11.5.1 or newer are required for Trusted Publishing. The workflow has read-only Git permissions and publishes the tagged commit without creating another commit or tag during the run.
+
+After the initial manual package publication, bump the root package to the next stable version on `main` before pushing its matching `v<version>` tag for the first automated release. Leave `--tag` unset so npm's default-tag check prevents an older version from replacing `latest`.
+
 ## Release and updates
 
 `.github/workflows/pkg-pr-new.yml` publishes the root package for each preview commit. Install a newer successful preview URL to update the application; conversation data remains in `MACARON_DATA_DIR`.
+
+`.github/workflows/pkg-pr-new.yml` builds and publishes only the repository root:
+
+```sh
+pnpm exec pkg-pr-new publish --bin .
+```
+
+After the first npm release exposes the package's `repository` metadata, pkg.pr.new can also use `https://pkg.pr.new/macaron-artifacts@<sha>`. It falls back to the full URL while that metadata is unavailable; full URLs remain valid afterward.

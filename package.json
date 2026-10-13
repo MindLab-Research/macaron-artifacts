@@ -2,6 +2,15 @@
   "name": "macaron-artifacts",
   "version": "0.1.0",
   "description": "One local WebUI for coding harnesses and streaming UI4A artifacts.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mindverse-ltd/macaron-artifacts.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @macaron/artifacts dev",
