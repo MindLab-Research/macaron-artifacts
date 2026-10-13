@@ -9,7 +9,7 @@ import { baseOptions } from '@/lib/layout.shared';
 import { track, type SiteEvents } from '@/lib/telemetry';
 import ChatShowcase from '@/components/chat-showcase';
 import { syntaxThemes } from '@/lib/palettes';
-import { appName, siteUrl } from '@/lib/shared';
+import { appName, gitConfig, siteUrl } from '@/lib/shared';
 
 function CommandCopyButton({ code, on }: { code: string; on: SiteEvents['command_copy'] }) {
   const [checked, onClick] = useCopyButton(() => { navigator.clipboard.writeText(code); track('command_copy', on); });
@@ -35,6 +35,7 @@ export function meta({}: Route.MetaArgs) {
     { name: 'twitter:card', content: 'summary' },
     { name: 'twitter:title', content: title },
     { name: 'twitter:description', content: description },
+    { 'script:ld+json': { '@context': 'https://schema.org', '@type': 'SoftwareApplication', name: appName, url: `${siteUrl}/`, description, applicationCategory: 'DeveloperApplication', operatingSystem: 'macOS, Linux, Windows', offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }, codeRepository: `https://github.com/${gitConfig.user}/${gitConfig.repo}`, publisher: { '@type': 'Organization', name: 'Mind Lab', url: 'https://www.mindlab.im' } } },
   ];
 }
 
