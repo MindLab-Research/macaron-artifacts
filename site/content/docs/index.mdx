@@ -3,9 +3,9 @@ title: Introduction
 description: Macaron Artifacts is one local WebUI for Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw, where agent replies render as live UI4A interfaces.
 ---
 
-**Macaron Artifacts** is one local WebUI for Claude Code, Codex, OpenCode, pi, Hermes, and OpenClaw. Install one package, start one server, and choose the harness per conversation.
+**Macaron Artifacts** brings Generative UI to the coding agent you already use. It is one local WebUI where [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), [pi](https://github.com/earendil-works/pi), [Hermes](https://github.com/NousResearch/hermes-agent), and [OpenClaw](https://github.com/openclaw/openclaw) answer with working interfaces — rendered while the reply is still streaming. Install one package, start one server, and choose the harness per conversation.
 
-Replies don't have to be prose. Agents answer with **UI4A** — UI for Agent — React components that stream like text and work like software. Rather than coaxing the model into a fixed UI schema, UI4A lets it write ordinary frontend code and has the runtime enforce the boundaries; the reasoning and benchmarks are in [UI4A: A Component-Native Harness for Generative UI](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui).
+It is the community edition of **UI4A** (UI for Agent) from [Mind Lab](https://www.mindlab.im). Raw HTML gives the model freedom with no contract; schema protocols such as [A2UI](https://a2ui.org) give control but cap what it can express. UI4A lets the agent write ordinary React — imports, components, state — and has the runtime decide what that code can reach. The design and benchmarks are in [UI4A: A Component-Native Harness for Generative UI](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui).
 
 ## What You Get
 
@@ -24,3 +24,10 @@ Replies don't have to be prose. Agents answer with **UI4A** — UI for Agent —
 - **Wired to the host** — generated components get scoped chat, state, and file capabilities, so a button can start the next turn or a form can save to `.artifacts`.
 
 Head to [Usage](/docs/usage) to install and run the WebUI, or read [Architecture](/docs/architecture/overview) for the current implementation.
+
+## Related
+
+- [Macaron GenUI Playground](https://genui.macaron.im) — watch UI4A stream and render in the browser, no install needed.
+- [dsh-generative-ui](https://github.com/MindLab-Research/dsh-generative-ui) — the same harness as a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+- [`partial-react`](https://www.npmjs.com/package/partial-react) — the progressive renderer behind inline blocks and Canvas.
+- [Macaron](https://macaron.im) — the personal agent from Mind Lab that UI4A was built for.

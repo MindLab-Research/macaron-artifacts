@@ -124,7 +124,7 @@ See [the application guide](artifacts/README.md) for module boundaries, streamin
 ## Related
 
 - [UI4A: A Component-Native Harness for Generative UI](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui) — the design, the action contract, and the token benchmark behind the runtime.
-- [Macaron GenUI Playground](https://genui.macaron.im) — try UI4A streaming in the browser across React, Vue, Svelte, and SolidJS.
+- [Macaron GenUI Playground](https://genui.macaron.im) — watch UI4A stream and render in the browser, no install needed.
 - [dsh-generative-ui](https://github.com/MindLab-Research/dsh-generative-ui) — the same harness as a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)'s web client.
 - [`partial-react`](https://www.npmjs.com/package/partial-react) — the progressive renderer that keeps the last good frame while TSX is still incomplete.
 - [Macaron](https://macaron.im) — the personal agent from Mind Lab that UI4A was built for.
