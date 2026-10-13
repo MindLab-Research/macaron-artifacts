@@ -1,6 +1,16 @@
 # Macaron Artifacts
 
-One React WebUI for coding harnesses. Install the `macaron-artifacts` package, start one local server, then choose Claude Code, Codex, OpenCode v1, OpenCode v2, pi, Hermes, or OpenClaw when creating a conversation. All seven choices use the same chat, approvals, Canvas, and Shiki themes.
+**Streams like text. Works like software.**
+
+[Website](https://artifacts.macaron.im) · [Docs](https://artifacts.macaron.im/docs) · [Quick start](https://artifacts.macaron.im/docs/usage) · [llms.txt](https://artifacts.macaron.im/llms.txt)
+
+Macaron Artifacts is one local React WebUI for coding agents — Claude Code, Codex, OpenCode (v1 and v2), pi, Hermes, and OpenClaw. Install the `macaron-artifacts` package, start one local server, and choose the harness per conversation. Every harness gets the same chat, approvals, Canvas, and Shiki themes.
+
+Agent replies can be live interfaces instead of prose. With **UI4A** (UI for Agent, from [Mind Lab](https://www.mindlab.im/updates/ui4a-a-component-native-harness-for-generative-ui)), the agent writes ordinary React and the runtime enforces the boundaries:
+
+- **Inline** — a ```` ```ui4a/tsx ```` block renders between paragraphs while its source is still streaming, and you can click, type, and drag before it finishes.
+- **Canvas** — a file at `.artifacts/canvases/<name>.ui4a.tsx` opens beside the conversation and stays across turns, with relative imports and persistent state.
+- **Components** — a bundled `$ui4a/ui` library with KaTeX and charts, themed by the app's own tokens.
 
 ## Install and run
 
