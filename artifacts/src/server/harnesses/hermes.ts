@@ -70,6 +70,70 @@ function vaultValue(method: string, response: { answers: Record<string, string[]
   if (method === 'vault.save_login') return JSON.stringify({ identifier: response.answers.identifier?.[0] || '', password: response.answers.password?.[0] || '' });
   return response.answers.code?.[0] || '';
 }
+// Hermes onboarding cards arrive as `setup_choose` (v0.21.x) or `setup_beat` (v0.22.x). Both answer with
+// row ids, so the question dialog only ever carries display labels across and maps them back here.
+type SetupRow = { id: string; label: string; detail?: string };
+const SETUP_CHOOSE_KINDS = new Set(['question', 'accent', 'theme', 'layout', 'connectors', 'plugins', 'tour', 'fork', 'machine_use']);
+// The beats a question card can answer. `connectors` and `plugins` are left out on purpose: those upstream
+// cards sign in to a connector or install a plugin and then report the resulting state, which the question
+// dialog cannot do, so answering would invent machine state. Unknown beats close unanswered for the same reason.
+const SETUP_QUESTION_BEATS = new Set(['name', 'theme', 'layout', 'tour', 'build']);
+const setupRows = (options: unknown): SetupRow[] => Array.isArray(options) ? options.map(item => record(item)).map(option => ({ id: string(option.id), label: string(option.label), detail: typeof option.detail === 'string' ? option.detail : undefined })).filter(row => row.id && row.label) : [];
+/** Upstream `matchSetupRow`: trimmed and case-insensitive against an id or a label, first matching row wins. */
+const matchSetupRow = (value: string, rows: SetupRow[]) => { const needle = value.trim().toLowerCase(); return rows.find(row => row.id.trim().toLowerCase() === needle || row.label.trim().toLowerCase() === needle)?.id ?? ''; };
+/**
+ * Upstream `setupChooseAnswer`: answers travel as ids, and only rows the card knew get named alongside.
+ * The unknown-id branch mirrors upstream rather than this file's needs — every id reaching it here already
+ * came from `matchSetupRow` or a known-row filter, so it is unreachable from the one call site below.
+ */
+function setupChooseAnswer(picked: string | string[], labels: Record<string, string>) {
+  const ids = Array.isArray(picked) ? picked : [picked];
+  if (!ids.some(id => Object.hasOwn(labels, id))) return { picked };
+  const named = ids.map(id => labels[id] ?? id);
+  return Array.isArray(picked) ? { picked, label: named } : { picked, label: named[0] };
+}
+function setupChooseQuestion(params: Record<string, unknown>, rows: SetupRow[]) {
+  return {
+    id: 'setup_choose',
+    question: string(params.question),
+    options: rows.map(row => ({ label: row.label, description: row.detail })),
+    // multi_select only means anything when there are rows to stage; the free-text card takes one value.
+    multiple: params.multi_select === true && rows.length > 0,
+    custom: true,
+  };
+}
+function setupChooseResult(params: Record<string, unknown>, rows: SetupRow[], values: string[]) {
+  // The free-text card (`question` with no rows) is itself the pick: its words never travel as `said`.
+  if (string(params.kind) === 'question' && !rows.length) return { picked: values[0] };
+  const ids = values.map(value => matchSetupRow(value, rows));
+  // Any value that names no row is free text the card never offered; upstream keeps that in `said` alone.
+  if (ids.some(id => !id)) return { said: values.join(' ') };
+  const labels = Object.fromEntries(rows.map(row => [row.id, row.label]));
+  // A single click replaces the card's initial pick; multi-select keeps the rows it already had staged.
+  const picked = params.multi_select === true
+    ? [...new Set([...(Array.isArray(params.preselected) ? params.preselected.map(string) : []).filter(id => Object.hasOwn(labels, id)), ...ids])]
+    : ids[0];
+  return setupChooseAnswer(picked, labels);
+}
+function setupBeatQuestion(beat: string, params: Record<string, unknown>) {
+  const card = record(params.card), question = string(params.question);
+  if (beat === 'name') { const suggested = string(card.suggested); return { id: 'setup_beat', question, options: suggested.trim() ? [{ label: suggested }] : [], multiple: false, custom: true }; }
+  // The theme contract has no rows at all: the card is a free-form accent entry, so nothing is pre-offered.
+  if (beat === 'theme') return { id: 'setup_beat', question, options: [], multiple: false, custom: true };
+  const options = setupRows(card.options);
+  // A row card without rows is unanswerable (custom:false rejects every value), so it closes unanswered
+  // instead of parking a question the user can only cancel.
+  return options.length ? { id: 'setup_beat', question, options: options.map(option => ({ label: option.label })), multiple: false, custom: false } : undefined;
+}
+function setupBeatAnswer(beat: string, params: Record<string, unknown>, value: string) {
+  const card = record(params.card);
+  if (beat === 'theme') return { answer: { accent: value } };
+  // Picking the suggestion is a name; anything else is typed free text, which upstream keeps for this beat alone.
+  if (beat === 'name') { const suggested = string(card.suggested); return suggested.trim() && value === suggested ? { answer: { name: value } } : { said: value }; }
+  // layout / tour / build answer with the option id plus the label the user actually saw.
+  const option = setupRows(card.options).find(row => row.label === value);
+  return option ? { answer: { [beat]: option.id, label: value } } : {};
+}
 /**
  * A free-tier challenge blocks the native turn until it is solved in a browser, so a required one
  * becomes a sticky notice carrying the upstream message and its location. An optional challenge is
@@ -273,6 +337,28 @@ export const hermesAdapter: HarnessAdapter = {
           const response = await turn.ask({ questions: vaultQuestions(request) }, signal);
           return { value: vaultValue(request.method, response) };
         }, 'Hermes vault request failed');
+        return true;
+      }
+      if (request.method === 'setup_choose') {
+        answerServerRequest(request.id, async signal => {
+          // A card the gateway cannot have meant anything by closes unanswered instead of asking the user.
+          if (!SETUP_CHOOSE_KINDS.has(string(request.params.kind)) || !string(request.params.question).trim()) return {};
+          const rows = setupRows(request.params.options), question = setupChooseQuestion(request.params, rows);
+          const response = await turn.ask({ questions: [question] }, signal);
+          return !('answers' in response) ? {} : setupChooseResult(request.params, rows, response.answers[question.id] ?? []);
+        });
+        return true;
+      }
+      if (request.method === 'setup_beat') {
+        answerServerRequest(request.id, async signal => {
+          const beat = string(request.params.beat);
+          // A beat the question dialog cannot answer closes unanswered, so the backend records real state.
+          if (!SETUP_QUESTION_BEATS.has(beat)) return {};
+          const question = setupBeatQuestion(beat, request.params);
+          if (!question) return {};
+          const response = await turn.ask({ questions: [question] }, signal);
+          return !('answers' in response) ? {} : setupBeatAnswer(beat, request.params, response.answers[question.id]?.[0] ?? '');
+        });
         return true;
       }
       return false;

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { Question } from '../../shared/questions.js';
+import { parseQuestionResponse } from '../../shared/questions.js';
+import type { Question, QuestionResponse } from '../../shared/questions.js';
 import { closeHermesConnections, decodeHermesNativeId, encodeHermesNativeId } from './hermes.js';
-import { parseHermesReadyLine, rpcPayload } from './hermes-server.js';
+import { parseHermesReadyLine, rpcPayload, type HermesServerRequest } from './hermes-server.js';
 
 type FakeRequest = { jsonrpc?: string; id: number | string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown };
 interface FakeGateway {
@@ -61,6 +62,51 @@ async function withFakeGateway(url: string, route: FakeRoute, run: (gateway: Fak
     globalThis.WebSocket = OriginalWebSocket;
     if (originalUrl === undefined) delete process.env.MACARON_HERMES_URL; else process.env.MACARON_HERMES_URL = originalUrl;
   }
+}
+
+/** Answer each card the adapter raises with the next staged value, keyed by the question it actually asked. */
+const staged = (values: string[][]) => { let step = 0; return async (question: Question): Promise<QuestionResponse> => ({ answers: { [question.id]: values[step++] } }); };
+
+/**
+ * Replay one turn carrying `chain` as a sequence of onboarding server requests. Each card is only raised
+ * once the previous one was answered, the way the upstream setup flow drives them, and the turn ends after
+ * the last answer so the adapter's reply frames are all captured.
+ */
+async function setupRoundTrip(url: string, chain: HermesServerRequest[], answer: (question: Question) => Promise<QuestionResponse>) {
+  const asked: Question[] = [];
+  let sent: FakeRequest[] = [];
+  const route: FakeRoute = (request, gateway) => {
+    if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: true });
+    else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-setup', stored_session_id: 'stored-setup' });
+    else if (request.method === 'prompt.submit') {
+      gateway.reply(request, { status: 'streaming' });
+      const first = chain[0];
+      if (first) gateway.soon(() => gateway.serverRequest(first.id, first.method, first.params));
+    } else {
+      const index = chain.findIndex(frame => frame.id === request.id);
+      if (index < 0) { gateway.reply(request, {}); return; }
+      const next = chain[index + 1];
+      if (next) gateway.soon(() => gateway.serverRequest(next.id, next.method, next.params));
+      else gateway.soon(() => gateway.event('message.complete', { text: 'setup done' }, 'runtime-setup'));
+    }
+  };
+  await withFakeGateway(url, route, async gateway => {
+    const { hermesAdapter } = await import('./hermes.js');
+    for await (const chunk of hermesAdapter.run({
+      cwd: '/tmp', prompt: 'finish onboarding', instructions: '', signal: new AbortController().signal,
+      ask: async (request: { questions: Question[] }) => {
+        asked.push(...request.questions);
+        const response = await answer(request.questions[0]);
+        // The real question dialog only submits answers shared/questions accepts; reject anything else
+        // so a test can never answer a card the user could not have answered.
+        if ('answers' in response && !parseQuestionResponse({ id: request.questions[0].id, questions: request.questions }, { answers: response.answers })) throw new Error('the question card cannot submit this answer');
+        return response;
+      },
+      approve: async () => true, onNativeSession: () => {},
+    })) void chunk;
+    sent = [...gateway.sent];
+  });
+  return { asked, reply: (id: string) => sent.find(frame => frame.id === id) };
 }
 
 describe('Hermes gateway adapter protocol helpers', () => {
@@ -555,5 +601,121 @@ describe('Hermes gateway adapter protocol helpers', () => {
       }]);
       expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['still running']);
     });
+  });
+
+  test('answers setup_choose picks and free text with the upstream result shapes', async () => {
+    const { asked, reply } = await setupRoundTrip('ws://hermes.setup-choose.test', [
+      { id: 'srq-pick', method: 'setup_choose', params: { session_id: 'runtime-setup', kind: 'theme', question: 'Pick a theme', options: [{ id: 'a', label: 'Aurora', detail: 'cool' }, { id: 'b', label: 'Bloom' }], preselected: ['b'] } },
+      { id: 'srq-multi', method: 'setup_choose', params: { session_id: 'runtime-setup', kind: 'theme', question: 'Pick themes', options: [{ id: 'a', label: 'Aurora' }, { id: 'b', label: 'Bloom' }, { id: 'c', label: 'Citrus' }], multi_select: true, preselected: ['b', 'gone'] } },
+      { id: 'srq-free', method: 'setup_choose', params: { session_id: 'runtime-setup', kind: 'question', question: 'Name this workspace' } },
+      { id: 'srq-said', method: 'setup_choose', params: { session_id: 'runtime-setup', kind: 'accent', question: 'Pick an accent', options: [{ id: 'a', label: 'Aurora' }] } },
+    ], staged([['Aurora'], ['Citrus'], ['Nimbus'], ['purple mountains']]));
+    expect(asked[0]).toEqual({ id: 'setup_choose', question: 'Pick a theme', options: [{ label: 'Aurora', description: 'cool' }, { label: 'Bloom' }], multiple: false, custom: true });
+    expect(asked[1]).toEqual({ id: 'setup_choose', question: 'Pick themes', options: [{ label: 'Aurora' }, { label: 'Bloom' }, { label: 'Citrus' }], multiple: true, custom: true });
+    expect(asked[2]).toEqual({ id: 'setup_choose', question: 'Name this workspace', options: [], multiple: false, custom: true });
+    // A single click replaces the preselected row and answers with the row id plus its label.
+    expect(reply('srq-pick')).toEqual({ jsonrpc: '2.0', id: 'srq-pick', result: { picked: 'a', label: 'Aurora' } });
+    // Multi-select keeps the staged rows and appends the new ones, labels aligned with the ids.
+    expect(reply('srq-multi')).toEqual({ jsonrpc: '2.0', id: 'srq-multi', result: { picked: ['b', 'c'], label: ['Bloom', 'Citrus'] } });
+    // The free-text question card has no rows, so the typed words are the pick itself.
+    expect(reply('srq-free')).toEqual({ jsonrpc: '2.0', id: 'srq-free', result: { picked: 'Nimbus' } });
+    // Typed text that names no row is never a pick.
+    expect(reply('srq-said')).toEqual({ jsonrpc: '2.0', id: 'srq-said', result: { said: 'purple mountains' } });
+  });
+
+  test('closes a cancelled or unusable setup_choose card without asking anything', async () => {
+    const { asked, reply } = await setupRoundTrip('ws://hermes.setup-choose-cancel.test', [
+      { id: 'srq-skip', method: 'setup_choose', params: { session_id: 'runtime-setup', kind: 'theme', question: 'Pick a theme', options: [{ id: 'a', label: 'Aurora' }] } },
+      { id: 'srq-unknown-kind', method: 'setup_choose', params: { session_id: 'runtime-setup', kind: 'nonsense', question: 'Pick a theme', options: [{ id: 'a', label: 'Aurora' }] } },
+      { id: 'srq-blank', method: 'setup_choose', params: { session_id: 'runtime-setup', kind: 'theme', question: '   ', options: [{ id: 'a', label: 'Aurora' }] } },
+    ], async () => ({ cancelled: true }));
+    expect(asked).toHaveLength(1);
+    expect(reply('srq-skip')).toEqual({ jsonrpc: '2.0', id: 'srq-skip', result: {} });
+    expect(reply('srq-unknown-kind')).toEqual({ jsonrpc: '2.0', id: 'srq-unknown-kind', result: {} });
+    expect(reply('srq-blank')).toEqual({ jsonrpc: '2.0', id: 'srq-blank', result: {} });
+  });
+
+  test('answers setup_beat name, layout and theme beats from the question card', async () => {
+    const { asked, reply } = await setupRoundTrip('ws://hermes.setup-beat.test', [
+      { id: 'srq-name-typed', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'name', question: 'What should I call you?', card: {} } },
+      { id: 'srq-name-pick', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'name', question: 'What should I call you?', card: { suggested: 'Sky' } } },
+      { id: 'srq-layout', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'layout', question: 'Pick a layout', card: { options: [{ id: 'sidebar-left', label: 'Basic' }, { id: 'terminal-deck', label: 'Elite' }] } } },
+      { id: 'srq-theme', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'theme', question: 'Pick an accent', card: { picker: 'accent' } } },
+      { id: 'srq-tour', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'tour', question: 'Take a tour?', card: { options: [{ id: 'quick', label: 'Quick tour' }, { id: 'skip', label: "Skip, let's build something" }] } } },
+      { id: 'srq-build', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'build', question: 'What should we build first?', card: { options: [{ id: 'fixed', label: 'A starter project' }, { id: 'own', label: 'My own idea' }] } } },
+    ], staged([['Nimbus'], ['Sky'], ['Elite'], ['forest'], ['Quick tour'], ['My own idea']]));
+    expect(asked[0]).toEqual({ id: 'setup_beat', question: 'What should I call you?', options: [], multiple: false, custom: true });
+    expect(asked[1]).toEqual({ id: 'setup_beat', question: 'What should I call you?', options: [{ label: 'Sky' }], multiple: false, custom: true });
+    expect(asked[2]).toEqual({ id: 'setup_beat', question: 'Pick a layout', options: [{ label: 'Basic' }, { label: 'Elite' }], multiple: false, custom: false });
+    expect(asked[3]).toEqual({ id: 'setup_beat', question: 'Pick an accent', options: [], multiple: false, custom: true });
+    // A name the card never suggested is typed free text, which only this beat keeps as `said`.
+    expect(reply('srq-name-typed')).toEqual({ jsonrpc: '2.0', id: 'srq-name-typed', result: { said: 'Nimbus' } });
+    expect(reply('srq-name-pick')).toEqual({ jsonrpc: '2.0', id: 'srq-name-pick', result: { answer: { name: 'Sky' } } });
+    expect(reply('srq-layout')).toEqual({ jsonrpc: '2.0', id: 'srq-layout', result: { answer: { layout: 'terminal-deck', label: 'Elite' } } });
+    expect(reply('srq-theme')).toEqual({ jsonrpc: '2.0', id: 'srq-theme', result: { answer: { accent: 'forest' } } });
+    // Every row beat answers under its own key, so a hardcoded field could not pass for all of them.
+    expect(reply('srq-tour')).toEqual({ jsonrpc: '2.0', id: 'srq-tour', result: { answer: { tour: 'quick', label: 'Quick tour' } } });
+    expect(reply('srq-build')).toEqual({ jsonrpc: '2.0', id: 'srq-build', result: { answer: { build: 'own', label: 'My own idea' } } });
+  });
+
+  test('leaves setup_beat connector and plugin beats for the machine to answer', async () => {
+    const { asked, reply } = await setupRoundTrip('ws://hermes.setup-beat-actions.test', [
+      { id: 'srq-connectors', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'connectors', question: 'Connect accounts', card: { suggested: ['github', 'gmail'] } } },
+      { id: 'srq-plugins', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'plugins', question: 'Install plugins', card: { plugins: ['web-search'] } } },
+    ], async () => { throw new Error('an action beat must not raise a question'); });
+    // Sign-in and install are upstream card actions; faking their outcome would invent machine state.
+    expect(asked).toEqual([]);
+    expect(reply('srq-connectors')).toEqual({ jsonrpc: '2.0', id: 'srq-connectors', result: {} });
+    expect(reply('srq-plugins')).toEqual({ jsonrpc: '2.0', id: 'srq-plugins', result: {} });
+  });
+
+  test('closes a rowless layout card instead of asking an unanswerable question', async () => {
+    const { asked, reply } = await setupRoundTrip('ws://hermes.setup-beat-empty.test', [
+      { id: 'srq-no-options', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'build', question: 'What should we build first?', card: { options: [] } } },
+      { id: 'srq-no-card', method: 'setup_beat', params: { session_id: 'runtime-setup', beat: 'layout', question: 'Pick a layout', card: {} } },
+    ], async () => { throw new Error('a rowless card must not raise a question'); });
+    // custom:false with zero rows can never be answered, so the card closes unanswered like an invalid one.
+    expect(asked).toEqual([]);
+    expect(reply('srq-no-options')).toEqual({ jsonrpc: '2.0', id: 'srq-no-options', result: {} });
+    expect(reply('srq-no-card')).toEqual({ jsonrpc: '2.0', id: 'srq-no-card', result: {} });
+  });
+
+  test('suppresses a cancelled onboarding card without answering it', async () => {
+    const route: FakeRoute = (request, gateway) => {
+      if (request.method === 'client.capabilities') gateway.reply(request, { server_requests: ['setup_choose', 'setup_beat'] });
+      else if (request.method === 'session.create') gateway.reply(request, { session_id: 'runtime-setup-cancel', stored_session_id: 'stored-setup-cancel' });
+      else if (request.method === 'prompt.submit') {
+        gateway.reply(request, { status: 'streaming' });
+        gateway.soon(() => gateway.serverRequest('srq-setup-choose-cancelled', 'setup_choose', { session_id: 'runtime-setup-cancel', kind: 'theme', question: 'Pick a theme', options: [{ id: 'a', label: 'Aurora' }] }));
+        gateway.soon(() => gateway.serverRequest('srq-cancel', 'request.cancel', { session_id: 'runtime-setup-cancel', request_id: 'srq-setup-choose-cancelled' }));
+      } else if (request.id === 'srq-cancel') {
+        gateway.soon(() => gateway.event('message.complete', { text: 'cancelled' }, 'runtime-setup-cancel'));
+      } else gateway.reply(request, {});
+    };
+    await withFakeGateway('ws://hermes.setup-cancel.test', route, async gateway => {
+      const { hermesAdapter } = await import('./hermes.js');
+      const chunks = [];
+      for await (const chunk of hermesAdapter.run({
+        cwd: '/tmp', prompt: 'ask then cancel', instructions: '', signal: new AbortController().signal,
+        ask: async (_request: unknown, signal?: AbortSignal) => {
+          if (!signal) throw new Error('cancel smoke did not receive a request signal');
+          return new Promise<{ cancelled: true }>(resolve => signal.addEventListener('abort', () => resolve({ cancelled: true }), { once: true }));
+        },
+        approve: async () => true, onNativeSession: () => {},
+      })) chunks.push(chunk);
+      expect(gateway.sent.find(request => request.id === 'srq-cancel')).toEqual({ jsonrpc: '2.0', id: 'srq-cancel', result: {} });
+      expect(gateway.sent.some(request => request.id === 'srq-setup-choose-cancelled')).toBe(false);
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta)).toEqual(['cancelled']);
+    });
+  });
+
+  test('routes onboarding cards only to the bound session', async () => {
+    const { asked, reply } = await setupRoundTrip('ws://hermes.setup-route.test', [
+      { id: 'srq-setup-foreign', method: 'setup_choose', params: { session_id: 'other-session', kind: 'theme', question: 'Pick a theme', options: [{ id: 'a', label: 'Aurora' }] } },
+      { id: 'srq-beat-foreign', method: 'setup_beat', params: { session_id: 'other-session', beat: 'layout', question: 'Pick a layout', card: { options: [{ id: 'terminal-deck', label: 'Elite' }] } } },
+    ], async () => { throw new Error('a foreign session must not claim a card'); });
+    expect(asked).toEqual([]);
+    expect(reply('srq-setup-foreign')?.error).toEqual({ code: -32601, message: 'no handler for server request: setup_choose' });
+    expect(reply('srq-beat-foreign')?.error).toEqual({ code: -32601, message: 'no handler for server request: setup_beat' });
   });
 });
